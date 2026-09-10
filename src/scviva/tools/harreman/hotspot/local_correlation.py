@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata_for_genes
 from scviva.tools.harreman.tools.knn import make_weights_non_redundant
-from scviva.utils import resolve_device
+from scviva.utils import resolve_device, stats_dtype
 
 from .local_autocorrelation import standardize_counts
 
@@ -85,8 +85,9 @@ def compute_local_correlation(
     device = resolve_device(device)
 
     # Convert to tensors
-    num_umi = torch.tensor(adata.uns["umi_counts"], dtype=torch.float64, device=device)
-    counts = torch.tensor(counts, dtype=torch.float64, device=device)
+    dtype = stats_dtype(device)
+    num_umi = torch.tensor(adata.uns["umi_counts"], dtype=dtype, device=device)
+    counts = torch.tensor(counts, dtype=dtype, device=device)
 
     # Center values
     counts = standardize_counts(adata, counts, model, num_umi, sample_specific)
@@ -95,7 +96,7 @@ def compute_local_correlation(
     weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
     weights = torch.sparse_coo_tensor(
         torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=torch.float64, device=device),
+        torch.tensor(weights.data, dtype=dtype, device=device),
         torch.Size(weights.shape),
         device=device,
     )
@@ -180,7 +181,7 @@ def compute_pairwise_correlation_results(
                 lc_zs_perm = compute_cor_Z_scores_torch(lcs_perm, eg2s)
                 lc_zs_perm_array[:, :, i] = lc_zs_perm.half()
                 lc_pvals_perm_array[:, :, i] = torch.tensor(
-                    norm.sf(lc_zs_perm.cpu().numpy()), device=device
+                    norm.sf(lc_zs_perm.cpu().numpy()), dtype=torch.float32, device=device
                 ).half()
 
         x = (perm_array > lcs.unsqueeze(-1)).sum(dim=2)

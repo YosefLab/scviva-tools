@@ -16,7 +16,7 @@ from scviva.tools.harreman.hotspot import models
 from scviva.tools.harreman.preprocessing.anndata import (
     counts_from_anndata_for_genes,
 )
-from scviva.utils import resolve_device
+from scviva.utils import resolve_device, stats_dtype
 
 from ._metabolite_scoring import compute_metabolite_cs_ct
 from ._stats import compute_max_cs, flatten, z_to_pval_fdr
@@ -340,7 +340,7 @@ def run_ct_cell_communication_analysis(
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_p_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
 
         # Prepare counts_1 and counts_2
@@ -446,7 +446,7 @@ def run_ct_cell_communication_analysis(
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_np_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
 
         # Prepare counts_1 and counts_2
         counts_1 = []
@@ -508,10 +508,12 @@ def run_ct_cell_communication_analysis(
             adata.uns["ct_ccc_results"]["np"]["m"]["cs"] = cs_m.detach().cpu().numpy()
 
         perm_cs_gp = torch.zeros(
-            (len(cell_type_pairs), counts_1.shape[0], M), dtype=torch.float64, device=device
+            (len(cell_type_pairs), counts_1.shape[0], M), dtype=stats_dtype(device), device=device
         )
         perm_cs_m = torch.zeros(
-            (len(cell_type_pairs), len(gene_pair_dict), M), dtype=torch.float64, device=device
+            (len(cell_type_pairs), len(gene_pair_dict), M),
+            dtype=stats_dtype(device),
+            device=device,
         )
 
         if check_analytic_null:
@@ -576,11 +578,11 @@ def run_ct_cell_communication_analysis(
                 )
                 gp_zs_perm_array[:, :, i] = Z_gp_perm
                 gp_pvals_perm_array[:, :, i] = torch.tensor(
-                    norm.sf(Z_gp_perm.cpu().numpy()), device=device
+                    norm.sf(Z_gp_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                 )
                 m_zs_perm_array[:, :, i] = Z_m_perm
                 m_pvals_perm_array[:, :, i] = torch.tensor(
-                    norm.sf(Z_m_perm.cpu().numpy()), device=device
+                    norm.sf(Z_m_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                 )
 
         adata.uns["ct_ccc_results"]["np"]["gp"]["perm_cs"] = perm_cs_gp.detach().cpu().numpy()
@@ -655,7 +657,7 @@ def create_weights_ct_pairs(
 ) -> torch.Tensor:
     """Create sparse weight tensors for each cell type pair."""
     indices = torch.tensor([weights.row, weights.col], dtype=torch.long, device=device)
-    values = torch.tensor(weights.data, dtype=torch.float64, device=device)
+    values = torch.tensor(weights.data, dtype=stats_dtype(device), device=device)
     shape = weights.shape
 
     cell_type_cats = cell_types.astype("category")
@@ -737,6 +739,7 @@ def compute_ct_interacting_cell_scores(
         Print detailed progress messages.
     """
     start = time.time()
+    device = resolve_device(device)
     if verbose:
         print("Computing cell type-aware gene pair and metabolite scores...")
 
@@ -949,7 +952,7 @@ def compute_ct_interacting_cell_scores(
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_p_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
 
         # Prepare counts_1 and counts_2
@@ -1059,7 +1062,7 @@ def compute_ct_interacting_cell_scores(
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_np_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
 
         # Prepare counts_1 and counts_2
         counts_1 = []
@@ -1204,7 +1207,7 @@ def compute_ct_p_results(
     )
     if not isinstance(EG2_m, torch.Tensor):
         device = EG2_gp.device
-        EG2_m = torch.tensor(EG2_m, device=device, dtype=torch.float64)
+        EG2_m = torch.tensor(EG2_m, device=device, dtype=stats_dtype(device))
 
     stdG_m = torch.sqrt(EG2_m)
     stdG_m[stdG_m == 0] = 1
@@ -1235,7 +1238,7 @@ def get_ct_cell_communication_results(
     sample_specific = "sample_key" in adata.uns
 
     if isinstance(D, np.ndarray):
-        D = torch.tensor(D, dtype=torch.float64, device=device)
+        D = torch.tensor(D, dtype=stats_dtype(device), device=device)
 
     def idx_to_gene(idx):
         return [genes[i] for i in idx] if isinstance(idx, list) else genes[idx]
@@ -1275,7 +1278,7 @@ def get_ct_cell_communication_results(
         cell_com_df_gp["Z_FDR"] = fdr_values.flatten()
 
         counts = counts_from_anndata_for_genes(adata, genes, layer_key_p_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
         counts_std = standardize_ct_counts(
             adata, counts, model, num_umi, sample_specific, cell_types
@@ -1308,7 +1311,7 @@ def get_ct_cell_communication_results(
         cell_com_df_gp[f"FDR_{suffix}"] = fdr_values.flatten()
 
         counts = counts_from_anndata_for_genes(adata, genes, layer_key_np_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         if adata.uns.get("center_counts_for_np_test", False):
             num_umi = counts.sum(dim=0)
             counts = standardize_ct_counts(
@@ -1392,7 +1395,7 @@ def center_ct_counts_torch(
     """
     # Binarize if using Bernoulli
     if model == "bernoulli":
-        counts = (counts > 0).double()
+        counts = (counts > 0).to(stats_dtype(counts.device))
         mu, var, _ = models.apply_model_per_cell_type(
             models.bernoulli_model_torch, counts, num_umi, cell_types
         )

@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Native Apple Silicon (MPS) support for scviva-tools' own harreman/hotspot code.**
+  `scviva.utils.resolve_device` now resolves `device="auto"` to `mps` (previously
+  cuda→cpu only, so Mac GPUs were silently ignored). Since MPS has no float64 kernel
+  support at all (a Metal hardware limitation, not a version gap), every
+  local-correlation/-autocorrelation and cell-cell-communication routine that used to
+  hard-code `torch.float64` now uses the new `scviva.utils.stats_dtype(device)` helper,
+  which returns `float32` on `mps` and keeps `float64` on `cpu`/`cuda`. Models that
+  train via scvi-tools' Lightning trainer (GimVI, DestVI, ResolVI, DiagVI, Stereoscope,
+  Tangram, SCVIVA's NicheVAE) can train on `mps` once scvi-tools resolves
+  `accelerator="mps"` — either passed explicitly, or via `accelerator="auto"` when the
+  `SCVI_ALLOW_MPS_AUTO=1` environment variable is set. scvi-tools' own `auto` resolution
+  deliberately keeps defaulting to `cpu` otherwise (see `scvi.model._utils.parse_device_args`)
+  so existing users' behavior doesn't silently change; the new `test_mps.yaml` CI workflow
+  (below) sets that variable so these models are actually exercised on `mps` in CI, not just
+  the harreman/hotspot code. Verified end-to-end training on MPS for ResolVI and SCVIVA
+  specifically, since both sample raw `torch`/`pyro`
+  Gamma/Dirichlet/Poisson distributions (native MPS kernels as of torch 2.14) outside
+  of `scvi.distributions`' own MPS guards. Also fixed `ResolVI.compute_dataset_dependent_priors`
+  returning numpy `float64` scalars (`background_ratio`, `median_distance`, etc.) that
+  `RESOLVAE` registers as buffers via `torch.tensor(...)`; on MPS this silently inherited
+  float64 and crashed on `.to("mps")` during module setup — now cast to Python `float`,
+  matching the existing `float(...)` idiom already used for
+  `downsample_counts_mean`/`std` in `_resolvae.py`. Full test suite (271 tests) passes
+  identically on CPU and MPS.
+
+- Dedicated **MPS CI workflow** (`.github/workflows/test_mps.yaml`), mirroring scvi-tools'
+  own `test_mps.yaml`: runs the full test suite on a real Apple Silicon GitHub-hosted
+  runner (`macos-14`) with `SCVI_ALLOW_MPS_AUTO=1`, `PYTORCH_ENABLE_MPS_FALLBACK=0`, and
+  `PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0` so `accelerator="auto"`-trained models actually
+  exercise `mps` instead of silently staying on `cpu`. Adds the corresponding
+  `test-metal` hatch environment (`metal` + `spatial` features) to `pyproject.toml`,
+  mirroring the existing `test-cuda` env. Gated the same way as `test_macos.yaml`/
+  `test_cuda.yaml`: PR label (`mps tests`/`all tests`), daily schedule, or manual dispatch.
+
 - **DiagVI** model (`scviva.external.diagvi.DIAGVI`), migrated from scvi-tools, for
   cross-modality alignment of paired spatial transcriptomics/proteomics data via a
   shared latent space with graph-guided and optimal-transport (Sinkhorn) losses;

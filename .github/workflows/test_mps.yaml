@@ -1,0 +1,82 @@
+name: Test (MPS)
+
+on:
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize, opened]
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  HATCH_ENV: test-metal
+
+jobs:
+  test:
+    # Run only when PR has label "mps tests" or "all tests", or on schedule/manual trigger
+    if: >-
+      (
+        contains(github.event.pull_request.labels.*.name, 'mps tests') ||
+        contains(github.event.pull_request.labels.*.name, 'all tests') ||
+        (contains(github.event_name, 'schedule') && github.repository == 'YosefLab/scviva-tools') ||
+        contains(github.event_name, 'workflow_dispatch')
+      )
+
+    runs-on: macos-14
+
+    defaults:
+      run:
+        shell: bash -e {0}
+
+    name: mps
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: blob:none
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.13"
+
+      - name: Create hatch environment
+        run: uvx hatch env create $HATCH_ENV
+
+      - name: List all installed package versions
+        run: uvx hatch run $HATCH_ENV:uv pip list
+
+      - name: Run tests using hatch
+        env:
+          MPLBACKEND: agg
+          PLATFORM: macos-14
+          DISPLAY: :42
+          COLUMNS: 120
+          # Real Metal-backed models get exercised (rather than silently falling back to
+          # cpu) by opting `accelerator="auto"` into `mps` here only, the same way
+          # scvi-tools' own test_mps.yaml does -- see scvi.model._utils.parse_device_args.
+          PYTORCH_MPS_HIGH_WATERMARK_RATIO: 0.0
+          PYTORCH_ENABLE_MPS_FALLBACK: 0
+          SCVI_ALLOW_MPS_AUTO: "1"
+        run: uvx hatch run $HATCH_ENV:run-cov -v --color=yes
+
+      - name: Generate coverage report
+        run: |
+          test -f .coverage || uvx hatch run $HATCH_ENV:cov-combine
+          uvx hatch run $HATCH_ENV:cov-report   # report visibly
+          uvx hatch run $HATCH_ENV:coverage xml # create report for upload
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: mps

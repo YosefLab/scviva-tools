@@ -836,13 +836,17 @@ class ResolVI(
         smallest_means = x[:, np.array(x.sum(0)).flatten().argsort()[:n_small_genes]].mean(
             1
         ) / np.array(x.mean(1))
-        background_ratio = np.mean(np.array(smallest_means))
+        # Cast off numpy's float64 scalars: RESOLVAE registers these as buffers via
+        # torch.tensor(...), which otherwise inherits float64 and can't move to MPS
+        # (no float64 kernel support there), matching the float() idiom already used
+        # for downsample_counts_mean/std in RESOLVAE.
+        background_ratio = float(np.mean(np.array(smallest_means)))
 
         distance = self.adata_manager.get_from_registry("distance_neighbor")
-        median_distance = np.median(np.partition(distance, 5)[:, 5])
+        median_distance = float(np.median(np.partition(distance, 5)[:, 5]))
         log_library_size = np.log1p(np.array(x.sum(1)))
-        mean_log_counts = np.median(log_library_size)
-        std_log_counts = np.std(log_library_size)
+        mean_log_counts = float(np.median(log_library_size))
+        std_log_counts = float(np.std(log_library_size))
 
         return {
             "background_ratio": background_ratio,

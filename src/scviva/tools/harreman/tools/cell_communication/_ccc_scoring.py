@@ -13,7 +13,7 @@ from scviva.tools.harreman.preprocessing.anndata import (
     counts_from_anndata_for_genes,
 )
 from scviva.tools.harreman.tools.knn import make_weights_non_redundant
-from scviva.utils import resolve_device
+from scviva.utils import resolve_device, stats_dtype
 
 from ._metabolite_scoring import compute_metabolite_cs
 from ._stats import compute_max_cs, flatten, z_to_pval_fdr
@@ -194,7 +194,7 @@ def run_cell_communication_analysis(
     weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
     weights = torch.sparse_coo_tensor(
         torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=torch.float64, device=device),
+        torch.tensor(weights.data, dtype=stats_dtype(device), device=device),
         torch.Size(weights.shape),
         device=device,
     )
@@ -264,13 +264,13 @@ def run_cell_communication_analysis(
 
         adata.uns["ccc_results"]["p"] = {"gp": {}, "m": {}}
 
-        Wtot2 = torch.tensor((weights.data**2).sum(), device=device)
+        Wtot2 = torch.tensor((weights.data**2).sum(), dtype=stats_dtype(device), device=device)
 
         # Load counts
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_p_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
 
         # Prepare counts_1 and counts_2
@@ -374,7 +374,7 @@ def run_cell_communication_analysis(
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_np_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
 
         # Prepare counts_1 and counts_2
         counts_1 = []
@@ -430,9 +430,13 @@ def run_cell_communication_analysis(
             cs_m = compute_metabolite_cs(cs_gp, gene_pair_dict, interacting_cell_scores=False)
             adata.uns["ccc_results"]["np"]["m"]["cs"] = cs_m.detach().cpu().numpy()
 
-        perm_cs_gp_a = torch.zeros((counts_1.shape[0], M), dtype=torch.float64, device=device)
+        perm_cs_gp_a = torch.zeros(
+            (counts_1.shape[0], M), dtype=stats_dtype(device), device=device
+        )
         perm_cs_gp_b = torch.zeros_like(perm_cs_gp_a)
-        perm_cs_m_a = torch.zeros((len(gene_pair_dict), M), dtype=torch.float64, device=device)
+        perm_cs_m_a = torch.zeros(
+            (len(gene_pair_dict), M), dtype=stats_dtype(device), device=device
+        )
         perm_cs_m_b = torch.zeros_like(perm_cs_m_a)
 
         if check_analytic_null:
@@ -477,11 +481,11 @@ def run_cell_communication_analysis(
                 )
                 gp_zs_perm_array[:, i] = Z_gp_perm
                 gp_pvals_perm_array[:, i] = torch.tensor(
-                    norm.sf(Z_gp_perm.cpu().numpy()), device=device
+                    norm.sf(Z_gp_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                 )
                 m_zs_perm_array[:, i] = Z_m_perm
                 m_pvals_perm_array[:, i] = torch.tensor(
-                    norm.sf(Z_m_perm.cpu().numpy()), device=device
+                    norm.sf(Z_m_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                 )
 
         adata.uns["ccc_results"]["np"]["gp"]["perm_cs_a"] = perm_cs_gp_a.detach().cpu().numpy()
@@ -647,6 +651,7 @@ def compute_interacting_cell_scores(
         Results are stored in ``adata.uns['interacting_cell_results']``.
     """
     start = time.time()
+    device = resolve_device(device)
     if verbose:
         print("Computing gene pair and metabolite scores...")
 
@@ -775,7 +780,7 @@ def compute_interacting_cell_scores(
     weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
     weights = torch.sparse_coo_tensor(
         torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=torch.float64, device=device),
+        torch.tensor(weights.data, dtype=stats_dtype(device), device=device),
         torch.Size(weights.shape),
         device=device,
     )
@@ -807,13 +812,13 @@ def compute_interacting_cell_scores(
 
         adata.uns["interacting_cell_results"]["p"] = {"gp": {}, "m": {}}
 
-        Wtot2 = torch.tensor((weights.data**2).sum(), device=device)
+        Wtot2 = torch.tensor((weights.data**2).sum(), dtype=stats_dtype(device), device=device)
 
         # Load counts
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_p_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
 
         # Prepare counts_1 and counts_2
@@ -923,7 +928,7 @@ def compute_interacting_cell_scores(
         counts = counts_from_anndata_for_genes(
             adata, genes, layer_key_np_test, dense=True, cells=cells
         )
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
 
         # Prepare counts_1 and counts_2
         counts_1 = []
@@ -981,11 +986,11 @@ def compute_interacting_cell_scores(
 
         if compute_significance in ["non-parametric", "both"]:
             perm_cs_gp_a = torch.zeros(
-                (n_cells, counts_1.shape[0], M), dtype=torch.float64, device=device
+                (n_cells, counts_1.shape[0], M), dtype=stats_dtype(device), device=device
             )
             perm_cs_gp_b = torch.zeros_like(perm_cs_gp_a)
             perm_cs_m_a = torch.zeros(
-                (n_cells, len(gene_pair_dict), M), dtype=torch.float64, device=device
+                (n_cells, len(gene_pair_dict), M), dtype=stats_dtype(device), device=device
             )
             perm_cs_m_b = torch.zeros_like(perm_cs_m_a)
 
@@ -1036,11 +1041,11 @@ def compute_interacting_cell_scores(
                     )
                     gp_zs_perm_array[:, :, i] = Z_gp_perm
                     gp_pvals_perm_array[:, :, i] = torch.tensor(
-                        norm.sf(Z_gp_perm.cpu().numpy()), device=device
+                        norm.sf(Z_gp_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                     )
                     m_zs_perm_array[:, :, i] = Z_m_perm
                     m_pvals_perm_array[:, :, i] = torch.tensor(
-                        norm.sf(Z_m_perm.cpu().numpy()), device=device
+                        norm.sf(Z_m_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                     )
 
             adata.uns["interacting_cell_results"]["np"]["gp"]["perm_cs_a"] = (
@@ -1176,7 +1181,7 @@ def compute_p_results(
     # Compute metabolite-level expected variance
     EG2_m = compute_metabolite_cs(EG2_gp, gene_pair_dict, interacting_cell_scores=False)
     if not isinstance(EG2_m, torch.Tensor):
-        EG2_m = torch.tensor(EG2_m, device=device, dtype=torch.float64)
+        EG2_m = torch.tensor(EG2_m, device=device, dtype=stats_dtype(device))
 
     stdG_m = torch.sqrt(EG2_m)
     stdG_m[stdG_m == 0] = 1
@@ -1244,7 +1249,7 @@ def compute_p_int_cell_results_no_ct(
     # Compute metabolite-level expected variance
     EG2_m = compute_metabolite_cs(EG2_gp, gene_pair_dict, interacting_cell_scores=True)
     if not isinstance(EG2_m, torch.Tensor):
-        EG2_m = torch.tensor(EG2_m, device=device, dtype=torch.float64)
+        EG2_m = torch.tensor(EG2_m, device=device, dtype=stats_dtype(device))
 
     stdG_m = torch.sqrt(EG2_m)
     stdG_m[stdG_m == 0] = 1
@@ -1279,7 +1284,7 @@ def get_cell_communication_results(
     sample_specific = "sample_key" in adata.uns
 
     if isinstance(D, np.ndarray):
-        D = torch.tensor(D, dtype=torch.float64, device=device)
+        D = torch.tensor(D, dtype=stats_dtype(device), device=device)
 
     # Initialize dataframes
     cell_com_df_gp = pd.DataFrame(gene_pairs, columns=["Gene 1", "Gene 2"])
@@ -1298,7 +1303,7 @@ def get_cell_communication_results(
         cell_com_df_gp["Z_FDR"] = fdr_values
 
         counts = counts_from_anndata_for_genes(adata, genes, layer_key_p_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
         from scviva.tools.harreman.hotspot.local_autocorrelation import standardize_counts
 
@@ -1329,7 +1334,7 @@ def get_cell_communication_results(
         cell_com_df_gp[f"FDR_{suffix}"] = fdr_values
 
         counts = counts_from_anndata_for_genes(adata, genes, layer_key_np_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         if adata.uns.get("center_counts_for_np_test", False):
             num_umi = counts.sum(dim=0)
             from scviva.tools.harreman.hotspot.local_autocorrelation import standardize_counts

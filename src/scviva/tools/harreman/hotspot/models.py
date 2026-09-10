@@ -5,6 +5,8 @@ import pandas as pd
 import torch
 from numba import jit, njit
 
+from scviva.utils import stats_dtype
+
 
 def danb_model(gene_counts, umi_counts):
     """Compute DANB (Depth-Adjusted Negative Binomial) model mean, variance, and second moment."""
@@ -400,13 +402,14 @@ def apply_model_per_cell_type(
         mu, var, x2: [genes, cells] tensors, concatenated across all cell types
     """
     device = counts.device
+    dtype = stats_dtype(device)
 
     unique_types = cell_types.unique()
     genes, cells = counts.shape
 
-    mu_all = torch.empty((genes, cells), dtype=torch.float64, device=device)
-    var_all = torch.empty((genes, cells), dtype=torch.float64, device=device)
-    x2_all = torch.empty((genes, cells), dtype=torch.float64, device=device)
+    mu_all = torch.empty((genes, cells), dtype=dtype, device=device)
+    var_all = torch.empty((genes, cells), dtype=dtype, device=device)
+    x2_all = torch.empty((genes, cells), dtype=dtype, device=device)
 
     cell_index = np.arange(cells)
 
@@ -419,8 +422,8 @@ def apply_model_per_cell_type(
 
         mu, var, x2 = model_fn(counts_ct, umi_ct, **kwargs)
 
-        mu_all[:, idx] = mu.to(torch.float64)
-        var_all[:, idx] = var.to(torch.float64)
-        x2_all[:, idx] = x2.to(torch.float64)
+        mu_all[:, idx] = mu.to(dtype)
+        var_all[:, idx] = var.to(dtype)
+        x2_all[:, idx] = x2.to(dtype)
 
     return mu_all, var_all, x2_all

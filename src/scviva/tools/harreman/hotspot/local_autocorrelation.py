@@ -14,7 +14,7 @@ from tqdm import tqdm
 from scviva.tools.harreman._data import harreman_data_hash, harreman_data_url
 from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata_for_genes
 from scviva.tools.harreman.tools.knn import make_weights_non_redundant
-from scviva.utils import resolve_device
+from scviva.utils import resolve_device, stats_dtype
 
 from . import models
 
@@ -170,8 +170,9 @@ def compute_local_autocorrelation(
     adata.uns["umi_counts"] = num_umi
 
     # Convert to tensors
-    num_umi = torch.tensor(adata.uns["umi_counts"], dtype=torch.float64, device=device)
-    counts = torch.tensor(counts, dtype=torch.float64, device=device)
+    dtype = stats_dtype(device)
+    num_umi = torch.tensor(adata.uns["umi_counts"], dtype=dtype, device=device)
+    counts = torch.tensor(counts, dtype=dtype, device=device)
 
     # Center values
     counts = standardize_counts(adata, counts, model, num_umi, sample_specific)
@@ -181,10 +182,10 @@ def compute_local_autocorrelation(
 
     # Compute weights
     weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
-    Wtot2 = torch.tensor((weights.data**2).sum(), device=device)
+    Wtot2 = torch.tensor((weights.data**2).sum(), dtype=dtype, device=device)
     weights = torch.sparse_coo_tensor(
         torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=torch.float64, device=device),
+        torch.tensor(weights.data, dtype=dtype, device=device),
         torch.Size(weights.shape),
         device=device,
     )
@@ -292,7 +293,7 @@ def compute_gene_autocorrelation_results(
                 stats_perm = compute_autocor_Z_scores_torch(G_perm, G_perm_max, Wtot2)
                 ac_zs_perm_array[:, i] = stats_perm["Z"].half()
                 ac_pvals_perm_array[:, i] = torch.tensor(
-                    norm.sf(stats_perm["Z"].cpu().numpy()), device=device
+                    norm.sf(stats_perm["Z"].cpu().numpy()), dtype=torch.float32, device=device
                 ).half()
 
         # Compute empirical permutation p-values
@@ -341,7 +342,7 @@ def center_counts_torch(counts, num_umi, model):
     """
     # Binarize if using Bernoulli
     if model == "bernoulli":
-        counts = (counts > 0).double()
+        counts = (counts > 0).to(stats_dtype(counts.device))
         mu, var, _ = models.bernoulli_model_torch(counts, num_umi)
     elif model == "danb":
         mu, var, _ = models.danb_model_torch(counts, num_umi)

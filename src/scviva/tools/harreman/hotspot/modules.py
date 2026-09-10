@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata_for_genes
 from scviva.tools.harreman.tools.knn import make_weights_non_redundant
-from scviva.utils import resolve_device
+from scviva.utils import resolve_device, stats_dtype
 
 from .local_autocorrelation import center_counts_torch
 
@@ -110,11 +110,13 @@ def compute_scores(adata, genes, layer_key, model, num_umi, device, _lambda=0.9)
     ``layer_key == "use_raw"`` (an AnnData limitation), so the subset is
     applied internally via :func:`counts_from_anndata_for_genes` instead.
     """
+    dtype = stats_dtype(device)
+
     # Get the weights matrix
     weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
     weights = torch.sparse_coo_tensor(
         torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=torch.float64, device=device),
+        torch.tensor(weights.data, dtype=dtype, device=device),
         torch.Size(weights.shape),
         device=device,
     )
@@ -123,8 +125,8 @@ def compute_scores(adata, genes, layer_key, model, num_umi, device, _lambda=0.9)
     counts_sub = counts_from_anndata_for_genes(adata, genes, layer_key, dense=True)
 
     # Convert to tensors
-    num_umi = torch.tensor(num_umi, dtype=torch.float64, device=device)
-    counts_sub = torch.tensor(counts_sub, dtype=torch.float64, device=device)
+    num_umi = torch.tensor(num_umi, dtype=dtype, device=device)
+    counts_sub = torch.tensor(counts_sub, dtype=dtype, device=device)
 
     # Center values
     sample_specific = "sample_key" in adata.uns.keys()

@@ -119,6 +119,8 @@ envs.hatch-test.matrix = [ { python = [ "3.12", "3.13", "3.14" ] } ]
 envs.hatch-test.dependency-groups = [ "dev", "test" ]
 envs.test-cuda.template = "hatch-test"
 envs.test-cuda.features = [ "cuda", "rapids-cuda13", "spatial" ]
+envs.test-metal.template = "hatch-test"
+envs.test-metal.features = [ "metal", "spatial" ]
 
 [tool.ruff]
 target-version = "py313"
