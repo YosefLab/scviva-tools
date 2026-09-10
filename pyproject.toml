@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "scviva-tools"
-version = "0.1.6"
+version = "0.1.7"
 description = "Consolidated spatial transcriptomics analysis toolkit with variational inference methods"
 readme = "README.md"
 keywords = [ "deconvolution", "deep learning", "single-cell", "spatial transcriptomics", "variational inference" ]
