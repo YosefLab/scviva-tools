@@ -5,7 +5,7 @@ on:
     branches: [main]
     types: [labeled, synchronize, opened]
   schedule:
-    - cron: "0 10 * * *"
+    - cron: "0 10 * * 1" # weekly (Mondays) -- full-suite MPS runs are memory-heavy on shared unified memory
   workflow_dispatch:
 
 concurrency:
@@ -64,7 +64,12 @@ jobs:
           # Real Metal-backed models get exercised (rather than silently falling back to
           # cpu) by opting `accelerator="auto"` into `mps` here only, the same way
           # scvi-tools' own test_mps.yaml does -- see scvi.model._utils.parse_device_args.
-          PYTORCH_MPS_HIGH_WATERMARK_RATIO: 0.0
+          #
+          # Deliberately NOT setting PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 here: it disables
+          # PyTorch's soft memory cap, so instead of one test cleanly hitting the (still real)
+          # "MPS backend out of memory" error and freeing its cache, allocations grow
+          # unchecked until the whole shared-memory pool collapses and cascades into unrelated
+          # tests. Left unset so the default ratio keeps that safety net.
           PYTORCH_ENABLE_MPS_FALLBACK: 0
           SCVI_ALLOW_MPS_AUTO: "1"
         run: uvx hatch run $HATCH_ENV:run-cov -v --color=yes

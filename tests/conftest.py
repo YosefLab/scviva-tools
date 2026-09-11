@@ -37,6 +37,23 @@ def set_seed(request):
     settings.seed = int(request.config.getoption("--seed"))
 
 
+@pytest.fixture(autouse=True)
+def _release_mps_cache_after_test():
+    """Frees the MPS caching allocator's cached blocks after each test.
+
+    Unlike CUDA's dedicated VRAM, MPS memory is unified with host RAM. The whole
+    suite runs as one pytest process, so without this, cached (but unused) tensor
+    memory from each test's models/optimizers accumulates across the run instead of
+    being reclaimed, eventually exhausting the shared pool and crashing unrelated
+    later tests with "MPS backend out of memory".
+    """
+    yield
+    import torch
+
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip optional tests unless --optional is passed, and vice versa."""
     run_optional = config.getoption("--optional")

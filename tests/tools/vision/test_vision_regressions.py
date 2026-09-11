@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 import tempfile
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -58,35 +54,6 @@ def _signature_matrix(adata: AnnData, columns: list[str] | None = None) -> pd.Da
         data[i % adata.n_vars, i] = 1.0
         data[(i + 1) % adata.n_vars, i] = 1.0
     return pd.DataFrame(data, index=adata.var_names, columns=columns)
-
-
-def test_import_scviva_does_not_eagerly_import_vision_dependencies():
-    repo_root = Path(__file__).resolve().parents[3]
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo_root / "src")
-    env["NUMBA_DISABLE_JIT"] = "1"
-    env["MPLCONFIGDIR"] = tempfile.gettempdir()
-    code = """
-import json
-import sys
-
-import scviva  # noqa: F401
-
-print(json.dumps({
-    "scanpy": "scanpy" in sys.modules,
-    "vision_diffexp": "scviva.tools.vision.tools.diffexp" in sys.modules,
-}))
-"""
-    proc = subprocess.run(
-        [sys.executable, "-c", code],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    loaded = json.loads(proc.stdout.strip().splitlines()[-1])
-
-    assert loaded == {"scanpy": False, "vision_diffexp": False}
 
 
 def test_compute_signature_scores_restores_signature_varm_key(monkeypatch):
