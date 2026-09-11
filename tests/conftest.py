@@ -48,9 +48,15 @@ def _release_mps_cache_after_test():
     later tests with "MPS backend out of memory".
     """
     yield
+    import gc
+
     import torch
 
     if torch.backends.mps.is_available():
+        # gc.collect() first: the caching allocator can only release blocks that are no
+        # longer referenced by Python (e.g. a trainer/model/optimizer from the just-finished
+        # test); empty_cache() alone leaves those still-referenced blocks cached.
+        gc.collect()
         torch.mps.empty_cache()
 
 
