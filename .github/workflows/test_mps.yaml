@@ -5,7 +5,7 @@ on:
     branches: [main]
     types: [labeled, synchronize, opened]
   schedule:
-    - cron: "0 10 * * *"
+    - cron: "0 10 * * 1" # weekly (Mondays) -- full-suite MPS runs are memory-heavy on shared unified memory
   workflow_dispatch:
 
 concurrency:
@@ -31,11 +31,35 @@ jobs:
 
     runs-on: macos-14
 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MPS memory is unified with host RAM, and GH's shared/virtualized macOS runners
+          # report a tight, day-to-day-variable ceiling for it (the same commit has been
+          # observed to pass and fail with no code change). Running the whole suite as one
+          # long-lived process accumulates real trained-model memory (86 model.train() calls
+          # suite-wide) until it tips over that ceiling and cascades into unrelated tests.
+          # Sharding by directory bounds worst-case memory to one shard and gives each a
+          # fresh runner/process. Shards are sized by how many real trainings they contain
+          # (see `grep -rc '\.train(' tests/*/`) rather than plain directory count, since
+          # test_diagvi.py alone accounts for 27 of the suite's 86 trainings.
+          - name: diagvi
+            paths: tests/external/test_diagvi.py
+          - name: model
+            paths: tests/model
+          - name: regression
+            paths: tests/regression
+          - name: external-and-misc
+            paths: >-
+              tests/external --ignore=tests/external/test_diagvi.py
+              tests/base tests/plotting tests/tools tests/utils
+
     defaults:
       run:
         shell: bash -e {0}
 
-    name: mps
+    name: mps (${{ matrix.name }})
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,10 +88,16 @@ jobs:
           # Real Metal-backed models get exercised (rather than silently falling back to
           # cpu) by opting `accelerator="auto"` into `mps` here only, the same way
           # scvi-tools' own test_mps.yaml does -- see scvi.model._utils.parse_device_args.
+          #
+          # PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 disables PyTorch's soft memory cap (a
+          # multiple of the OS-reported "recommended max working set", which GH's virtualized
+          # macOS runners report as very small). Without this, the *default* ratio makes even
+          # small real-model allocations fail immediately ("MPS allocated: 0" OOM). Matches
+          # upstream scvi-tools' own test_mps.yaml, which relies on the same setting.
           PYTORCH_MPS_HIGH_WATERMARK_RATIO: 0.0
           PYTORCH_ENABLE_MPS_FALLBACK: 0
           SCVI_ALLOW_MPS_AUTO: "1"
-        run: uvx hatch run $HATCH_ENV:run-cov -v --color=yes
+        run: uvx hatch run $HATCH_ENV:run-cov -v --color=yes ${{ matrix.paths }}
 
       - name: Generate coverage report
         run: |
@@ -79,4 +109,4 @@ jobs:
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          flags: mps
+          flags: mps-${{ matrix.name }}
