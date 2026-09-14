@@ -209,7 +209,7 @@ The version is scVIVA-Tools is an upgraded version of DestVI compared to what we
 Main Additions of new version:
 
 - Batch embedding for correction in condSCVI.
-- MoG (Mixture-of-Gaussians) in CondSCVI instead of posterior Visa Acquirer Monitoring Program (VAMP) estimation.
+- MoG (Mixture-of-Gaussians) in CondSCVI instead of VampPrior estimation.
 - Option to use a more coarse spatial layer and let the coarse one inform the fine deconvolution (Curio sometimes has very few counts and then it's hard to do deconvolution)
 - mixture of sc and spatial data in DestVI to guide deconvolution (analogue to https://pubmed.ncbi.nlm.nih.gov/38689377/)
 
