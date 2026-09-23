@@ -31,6 +31,12 @@ from scvi.train._config import merge_kwargs
 from scvi.utils import de_dsp, setup_anndata_dsp, track
 
 from scviva.model.base import SpatialBaseModel, SpatialNeighborhoodMixin, SpatialPredictiveMixin
+from scviva.model.base._neighborhood_mixin import (
+    COMPUTE_NEIGHBORS_UNS_KEY,
+    NEIGHBORS_VERSION,
+    RESOLVI_PREPARE_DATA_UNS_KEY,
+    _squared_knn_from_distance_graph,
+)
 from scviva.module._resolvae import RESOLVAE
 
 if TYPE_CHECKING:
@@ -681,6 +687,10 @@ class ResolVI(
     ) -> None:
         """Compute spatial neighbors and store in ``adata.obsm``.
 
+        ``adata.obsm["index_neighbor"]`` holds the ``n_neighbors`` nearest cells (excluding
+        the cell itself, within the same batch) and ``adata.obsm["distance_neighbor"]`` the
+        corresponding *squared* Euclidean distances, sorted ascending.
+
         Parameters
         ----------
         adata
@@ -698,11 +708,8 @@ class ResolVI(
             batch_key = slice_key
         try:
             import scanpy
-            from sklearn.neighbors._base import _kneighbors_from_graph
         except ImportError as err:
-            raise ImportError(
-                "Please install scanpy and scikit-learn -- `pip install scanpy`"
-            ) from err
+            raise ImportError("Please install scanpy -- `pip install scanpy`") from err
 
         if batch_key is None:
             indices = [np.arange(adata.n_obs)]
@@ -724,10 +731,8 @@ class ResolVI(
                 )
             except ImportError:
                 scanpy.pp.neighbors(sub_data, n_neighbors=n_neighbors + 5, use_rep=spatial_rep)
-            distances = sub_data.obsp["distances"] ** 2
-
-            distance_neighbor[index, :], index_neighbor_batch = _kneighbors_from_graph(
-                distances, n_neighbors, return_distance=True
+            distance_neighbor[index, :], index_neighbor_batch = _squared_knn_from_distance_graph(
+                sub_data.obsp["distances"], n_neighbors
             )
             index_neighbor[index, :] = index[index_neighbor_batch]
 
@@ -762,10 +767,15 @@ class ResolVI(
             Key in ``adata.obs`` corresponding to pre-computed size factors.
         %(param_cat_cov_keys)s
         prepare_data
-            If ``True``, automatically compute spatial neighbors via :meth:`_prepare_data`.
-            Set to ``False`` if neighbors are already in ``adata.obsm``.
+            If ``True``, compute spatial neighbors per batch via :meth:`_prepare_data`, unless
+            up-to-date neighbors are already stored, either by a previous :meth:`_prepare_data`
+            run with the same config or by :meth:`compute_neighbors` (which takes precedence
+            unless ``prepare_data_kwargs`` is passed). Set to ``False`` to use neighbors in
+            ``adata.obsm`` as-is; ``distance_neighbor`` must hold squared Euclidean distances.
         prepare_data_kwargs
             Keyword args for :meth:`_prepare_data` (e.g. ``n_neighbors``, ``spatial_rep``).
+            Passing this forces :meth:`_prepare_data` to be used over neighbors from
+            :meth:`compute_neighbors`.
         %(param_unlabeled_category)s
         """
         setup_method_args = cls._get_setup_method_args(**locals())
@@ -774,24 +784,58 @@ class ResolVI(
             "Please filter cells with less than 5 counts prior to running ResolVI."
         )
         if prepare_data:
-            if prepare_data_kwargs is None:
-                prepare_data_kwargs = {}
+            explicit_kwargs = prepare_data_kwargs is not None
+            prepare_data_kwargs = prepare_data_kwargs or {}
             spatial_rep = prepare_data_kwargs.get("spatial_rep", "X_spatial")
-            effective_config = {"batch_key": batch_key, **prepare_data_kwargs}
-            stored_config = adata.uns.get("_resolvi_prepare_data_config", None)
-            neighbors_valid = (
-                stored_config == effective_config
-                and "index_neighbor" in adata.obsm
+            # ``_version`` invalidates neighbors cached by an older release whose
+            # ``_prepare_data`` output differed (v2: scverse/scvi-tools#3977 fix).
+            effective_config = {
+                "batch_key": batch_key,
+                **prepare_data_kwargs,
+                "_version": NEIGHBORS_VERSION,
+            }
+            has_neighbors = (
+                "index_neighbor" in adata.obsm
                 and "distance_neighbor" in adata.obsm
                 and int(adata.obsm["index_neighbor"].max()) < adata.n_obs
             )
-            if not neighbors_valid and spatial_rep in adata.obsm:
+            stored_config = adata.uns.get(RESOLVI_PREPARE_DATA_UNS_KEY, None)
+            compute_config = adata.uns.get(COMPUTE_NEIGHBORS_UNS_KEY, None)
+            # Neighbors from ``compute_neighbors`` take precedence unless ``prepare_data_kwargs``
+            # explicitly asks for ``_prepare_data`` to be run.
+            from_compute_neighbors = (
+                has_neighbors
+                and not explicit_kwargs
+                and compute_config is not None
+                and compute_config.get("_version") == NEIGHBORS_VERSION
+            )
+            from_prepare_data = has_neighbors and stored_config == effective_config
+            if from_compute_neighbors:
+                if batch_key is not None:
+                    batches = adata.obs[batch_key].to_numpy()
+                    if (batches[adata.obsm["index_neighbor"]] != batches[:, None]).any():
+                        warnings.warn(
+                            "Neighbors from `compute_neighbors` link cells across batches of "
+                            f"'{batch_key}'. Call `setup_anndata` with `prepare_data_kwargs` to "
+                            "recompute them per batch.",
+                            UserWarning,
+                            stacklevel=settings.warnings_stacklevel,
+                        )
+            elif not from_prepare_data and spatial_rep in adata.obsm:
+                if has_neighbors and stored_config is None and compute_config is None:
+                    warnings.warn(
+                        "Overwriting existing `index_neighbor`/`distance_neighbor` in "
+                        "`adata.obsm`. Pass `prepare_data=False` to keep pre-computed neighbors.",
+                        UserWarning,
+                        stacklevel=settings.warnings_stacklevel,
+                    )
                 print(
                     "Preparing data for training. This may take a while. "
                     "RAPIDS SingleCell will be used if installed."
                 )
                 cls._prepare_data(adata, batch_key=batch_key, **prepare_data_kwargs)
-                adata.uns["_resolvi_prepare_data_config"] = effective_config
+                adata.uns[RESOLVI_PREPARE_DATA_UNS_KEY] = effective_config
+                adata.uns.pop(COMPUTE_NEIGHBORS_UNS_KEY, None)
             elif "index_neighbor" not in adata.obsm:
                 raise KeyError(
                     f"Spatial key '{spatial_rep}' not found in adata.obsm and no pre-computed "

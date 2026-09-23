@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ResolVI._prepare_data` stored wrong spatial neighbors** ([scverse/scvi-tools#3977]).
+  `obsp["distances"] ** 2` is a *matrix* power for scipy sparse matrices (a two-hop product
+  graph), not element-wise squaring, and `_kneighbors_from_graph` truncated each CSR row in
+  storage order, which isn't guaranteed to be distance order and could include the cell
+  itself. As a result, `index_neighbor` almost never held the true spatial kNN, and
+  `distance_neighbor`, and therefore `median_distance`, the RBF kernel scale, were
+  miscalibrated. Neighbors are now selected by a new `_squared_knn_from_distance_graph`
+  helper: it drops self-loops by index (coincident centroids stay valid neighbors), sorts
+  each row by distance, and stores element-wise **squared** Euclidean distances, as the
+  diffusion kernel in `RESOLVAE` expects. This also removes the dependency on sklearn's
+  private `_kneighbors_from_graph`.
+  **Behavior change:** models trained through `setup_anndata(prepare_data=True)`, the
+  default, now see different (correct) neighbors and a smaller `median_distance`, so
+  results differ from earlier releases and from `scvi.external.RESOLVI`. Neighbors cached in
+  `adata.uns["_resolvi_prepare_data_config"]` by earlier releases are recomputed
+  automatically. The config now carries a `_version` key.
+- **`SpatialNeighborhoodMixin.compute_neighbors` now follows ResolVI's neighbor convention,
+  and `ResolVI.setup_anndata` no longer silently discards its output** (follow-up to
+  [scverse/scvi-tools#3977]). `distance_neighbor` is now defined everywhere as **squared**
+  Euclidean distances, sorted ascending, with the cell itself excluded; this is documented
+  on the mixin, `_prepare_data` and in the user guide. Before this fix:
+  - Both backends stored raw distances.
+  - The squidpy backend took neighbors in CSR storage order, not distance order. It read
+    indices and distances from two different sparse matrices, and padded short rows with
+    index 0.
+  - The RAPIDS backend assumed self is always column 0, which fails when cells share a
+    centroid.
+
+  Both backends now go through the shared `_squared_knn_from_distance_graph` helper.
+  squidpy's graph only decides which cells are neighbors; distances are recomputed from
+  the coordinates so coincident cells aren't dropped. The helper raises if a cell has too
+  few neighbors instead of padding.
+  - `compute_neighbors` is now a classmethod, so `ResolVI.compute_neighbors(adata)` can be
+    called before `setup_anndata`. `model.compute_neighbors(adata)` still works. It records
+    its config in `adata.uns["_spatial_compute_neighbors_config"]`.
+  - `ResolVI.setup_anndata(prepare_data=True)`, the default, previously overwrote those
+    neighbors whenever `X_spatial` existed. It now keeps them unless `prepare_data_kwargs`
+    is passed explicitly. It warns if they link cells across batches of `batch_key`, and
+    before overwriting neighbors of unknown origin (use `prepare_data=False` to keep them).
+
+[scverse/scvi-tools#3977]: https://github.com/scverse/scvi-tools/issues/3977
+
 ## [0.1.7] - 2026-09-10
 
 ### Added

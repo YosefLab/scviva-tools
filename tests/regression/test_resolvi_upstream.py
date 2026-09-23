@@ -48,7 +48,10 @@ def _train_scviva(adata, seed=SEED, **model_kwargs):
     scvi_pkg.settings.seed = seed
     torch.manual_seed(seed)
     np.random.seed(seed)
-    SpatialResolVI.setup_anndata(adata)
+    # Reuse the neighbors scvi-tools just computed: scviva's ``_prepare_data`` intentionally
+    # differs from upstream since the scverse/scvi-tools#3977 fix, and these tests compare
+    # model math on identical inputs.
+    SpatialResolVI.setup_anndata(adata, prepare_data=False)
     model = SpatialResolVI(adata, **model_kwargs)
     model.train(max_epochs=N_EPOCHS, lr=1e-3)
     return model
@@ -172,7 +175,10 @@ def test_resolvi_size_factor_matches(adata):
     scvi_pkg.settings.seed = SEED
     torch.manual_seed(SEED)
     np.random.seed(SEED)
-    SpatialResolVI.setup_anndata(adata, size_factor_key="cell_area")
+    # Reuse the neighbors scvi-tools just computed: scviva's ``_prepare_data`` intentionally
+    # differs from upstream since the scverse/scvi-tools#3977 fix, and these tests compare
+    # model math on identical inputs.
+    SpatialResolVI.setup_anndata(adata, size_factor_key="cell_area", prepare_data=False)
     spatial_model = SpatialResolVI(adata, size_scaling=True)
     spatial_model.train(max_epochs=N_EPOCHS)
 
