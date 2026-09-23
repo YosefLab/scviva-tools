@@ -887,7 +887,10 @@ class ResolVI(
         background_ratio = float(np.mean(np.array(smallest_means)))
 
         distance = self.adata_manager.get_from_registry("distance_neighbor")
-        median_distance = float(np.median(np.partition(distance, 5)[:, 5]))
+        # Kernel scale: median distance to the 6th-nearest neighbor (as upstream), or to the
+        # farthest stored neighbor when fewer than 6 are stored (e.g. ``n_neighs=5``).
+        kth = min(5, distance.shape[1] - 1)
+        median_distance = float(np.median(np.partition(distance, kth)[:, kth]))
         log_library_size = np.log1p(np.array(x.sum(1)))
         mean_log_counts = float(np.median(log_library_size))
         std_log_counts = float(np.std(log_library_size))

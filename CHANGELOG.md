@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     neighbors whenever `X_spatial` existed. It now keeps them unless `prepare_data_kwargs`
     is passed explicitly. It warns if they link cells across batches of `batch_key`, and
     before overwriting neighbors of unknown origin (use `prepare_data=False` to keep them).
+  - `ResolVI` no longer crashes with fewer than 6 stored neighbors (e.g.
+    `compute_neighbors(n_neighs=5)`): the `median_distance` kernel-scale prior falls back to
+    the farthest stored neighbor instead of indexing the 6th. Unchanged for ≥ 6 neighbors.
 
 [scverse/scvi-tools#3977]: https://github.com/scverse/scvi-tools/issues/3977
 

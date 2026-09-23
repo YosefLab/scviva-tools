@@ -293,3 +293,32 @@ def test_resolvi_neighbor_paths_agree():
         ]
     )
     assert overlap > 0.99
+
+
+@pytest.mark.parametrize("n_neighbors", [1, 5])
+def test_resolvi_fewer_than_six_neighbors(n_neighbors):
+    """Models build with fewer than 6 stored neighbors (kernel-scale prior used ``[:, 5]``)."""
+    adata = _spatial_adata()
+    rng = np.random.default_rng(0)
+    adata.obsm["index_neighbor"] = rng.integers(0, adata.n_obs, (adata.n_obs, n_neighbors))
+    distances = np.sort(rng.uniform(0.1, 2.0, (adata.n_obs, n_neighbors)), axis=1)
+    adata.obsm["distance_neighbor"] = distances
+    ResolVI.setup_anndata(adata, prepare_data=False)
+
+    model = ResolVI(adata)
+
+    priors = model.compute_dataset_dependent_priors()
+    assert priors["median_distance"] == pytest.approx(np.median(distances[:, -1]))
+
+
+def test_resolvi_compute_neighbors_five_then_default_setup():
+    """``compute_neighbors(n_neighs=5)`` + default ``setup_anndata`` yields a usable model."""
+    pytest.importorskip("squidpy")
+    adata = _spatial_adata()
+    ResolVI.compute_neighbors(adata, spatial_key="X_spatial", n_neighs=5)
+    ResolVI.setup_anndata(adata)
+
+    model = ResolVI(adata)
+    model.train(max_epochs=1)
+
+    assert adata.obsm["index_neighbor"].shape == (adata.n_obs, 5)
