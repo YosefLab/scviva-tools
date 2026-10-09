@@ -10,6 +10,10 @@ gimvi_tutorial
 stereoscope_heart_LV_tutorial
 cell2location_lymph_node_spatial_tutorial
 tangram_scvi_tools
+amici_tutorial
+starfysh_slideseq_tutorial
+starfysh_tutorial_simulation
+starfysh_tutorial_integration
 DiagVI_spatial_transcriptomics
 DiagVI_spatial_proteomics
 Visium_colon_Harreman_pipeline
