@@ -11,6 +11,7 @@ user_guide/index
 tutorials/index
 api/index
 developer/index
+architecture/index
 faq
 changelog.md
 references

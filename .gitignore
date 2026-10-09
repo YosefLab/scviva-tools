@@ -52,6 +52,6 @@ MANIFEST
 # OS
 .DS_Store
 Thumbs.db
-/docs/architecture/
+/docs/architecture/*.html
 /docs/superpowers/
 /.claude/
