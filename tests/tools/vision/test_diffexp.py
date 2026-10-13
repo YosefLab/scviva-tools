@@ -83,3 +83,19 @@ def test_rank_genes_groups_explicit_reference_path_still_handles_constant_gene()
     for group_name in result["pvals_adj"].dtype.names:
         pvals_adj = result["pvals_adj"][group_name]
         assert not np.isnan(pvals_adj).any()
+
+
+def test_rank_genes_groups_rejects_unimplemented_methods():
+    """Only the Wilcoxon test is ported; other scanpy methods must fail clearly."""
+    import pytest
+
+    adata = _make_grouped_adata()
+    for method in ["t-test", "t-test_overestim_var", "logreg"]:
+        with pytest.raises(ValueError, match="Method must be one of"):
+            rank_genes_groups(adata, groupby="group", use_raw=False, method=method)
+
+
+def test_rank_genes_groups_method_none_uses_wilcoxon():
+    adata = _make_grouped_adata()
+    rank_genes_groups(adata, groupby="group", use_raw=False, method=None)
+    assert adata.uns["rank_genes_groups"]["params"]["method"] == "wilcoxon"

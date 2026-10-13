@@ -229,8 +229,19 @@ class SCVIVA(
 
         Parameters
         ----------
+        adata
+            AnnData object with equivalent structure to initial AnnData. If ``None``, defaults to
+            the AnnData object used to initialize the model.
+        indices
+            Indices of cells in adata to use. If ``None``, all cells are used.
+        give_mean
+            Give mean of distribution or sample from it.
+        batch_size
+            Minibatch size for data loading into model. Defaults to ``scvi.settings.batch_size``.
         backend
             ``"cpu"`` (default) or ``"rapids"`` for cupy array output.
+        **kwargs
+            Keyword args for :meth:`~scvi.model.base.VAEMixin.get_latent_representation`.
         """
         latent = super().get_latent_representation(
             adata=adata, indices=indices, give_mean=give_mean, batch_size=batch_size, **kwargs
@@ -268,6 +279,8 @@ class SCVIVA(
             observed composition has no posterior to sample.
         return_mean
             Must be ``True``. Present only for API compatibility with the mixin.
+        **kwargs
+            Present only for API compatibility with the mixin. Unused.
 
         Returns
         -------
@@ -405,6 +418,25 @@ class SCVIVA(
         %(param_size_factor_key)s
         %(param_cat_cov_keys)s
         %(param_cont_cov_keys)s
+        %(param_sample_key)s
+        cell_coordinates_key
+            Key in ``adata.obsm`` for the spatial coordinates of each cell.
+        expression_embedding_key
+            Key in ``adata.obsm`` for the cell expression embedding (e.g. scVI latent means).
+        expression_embedding_niche_key
+            Key in ``adata.obsm`` for the average expression embedding per cell type in each
+            cell's niche, as computed by :meth:`~scviva.model.SCVIVA.preprocessing_anndata`.
+        niche_composition_key
+            Key in ``adata.obsm`` for the cell-type composition of each cell's niche, as computed
+            by :meth:`~scviva.model.SCVIVA.preprocessing_anndata`.
+        niche_indexes_key
+            Key in ``adata.obsm`` for the indices of each cell's nearest spatial neighbors, as
+            computed by :meth:`~scviva.model.SCVIVA.preprocessing_anndata`.
+        niche_distances_key
+            Key in ``adata.obsm`` for the distances to each cell's nearest spatial neighbors, as
+            computed by :meth:`~scviva.model.SCVIVA.preprocessing_anndata`.
+        **kwargs
+            Keyword args for :meth:`~scvi.data.AnnDataManager.register_fields`.
         """
         setup_method_args = cls._get_setup_method_args(**locals())
         anndata_fields = [

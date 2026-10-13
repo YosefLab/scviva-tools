@@ -34,6 +34,9 @@ class nicheVAE(VAE):
     ----------
     n_input
         Number of input features.
+    n_output_niche
+        Dimensionality of the niche state (per cell type) predicted by the niche state
+        decoder (:class:`~scviva.module.NicheDecoder`).
     n_batch
         Number of batches. If ``0``, no batch correction is performed.
     n_labels
@@ -162,6 +165,10 @@ class nicheVAE(VAE):
     batch_embedding_kwargs
         Keyword arguments passed into :class:`~scvi.nn.Embedding` if ``batch_representation`` is
         set to ``"embedding"``.
+    extra_encoder_kwargs
+        Additional keyword arguments passed into :class:`~scvi.nn.Encoder`.
+    **vae_kwargs
+        Keyword args for :class:`~scvi.module.VAE`.
 
     Notes
     -----
@@ -368,7 +375,43 @@ class nicheVAE(VAE):
         y: torch.Tensor | None = None,
         transform_batch: torch.Tensor | None = None,
     ) -> dict[str, Distribution | None]:
-        """Run the generative process."""
+        """Run the generative process.
+
+        Parameters
+        ----------
+        z
+            Latent values with shape ``(n_cells, n_latent)`` (or with a leading sample
+            dimension).
+        library
+            Log library size of each cell. Used as the size factor unless
+            ``use_size_factor_key=True``.
+        batch_index
+            Batch index of each cell, with shape ``(n_cells, 1)``.
+        cont_covs
+            Continuous covariates, concatenated to ``z`` as decoder input. ``None`` if no
+            continuous covariates are registered.
+        cat_covs
+            Categorical covariates, with one column per covariate, passed to the decoders.
+            ``None`` if no categorical covariates are registered.
+        size_factor
+            Log size factor of each cell. Only used when ``use_size_factor_key=True``;
+            otherwise ``library`` is used.
+        y
+            Label of each cell, with shape ``(n_cells, 1)``. Passed to the expression decoder,
+            used to select the dispersion when ``dispersion="gene-label"`` and, for a
+            semi-supervised mixture prior, to bias the prior mixture weights toward the
+            cell's label.
+        transform_batch
+            If not ``None``, replace the batch index of every cell with this value before
+            decoding.
+
+        Returns
+        -------
+        Dictionary with the expression likelihood (``px``), the library-size prior (``pl``,
+        ``None`` when ``use_observed_lib_size=True``), the latent prior (``pz``), the niche
+        state mean and variance, the niche state likelihood and the niche composition
+        :class:`~torch.distributions.Dirichlet` distribution.
+        """
         from scvi.distributions import (
             NegativeBinomial,
             Poisson,
@@ -512,7 +555,36 @@ class nicheVAE(VAE):
         epsilon: float = 1e-6,
         n_samples_mixture: int = 10,
     ) -> NicheLossOutput:
-        """Compute the loss."""
+        """Compute the loss.
+
+        Parameters
+        ----------
+        tensors
+            Dictionary of minibatch tensors; uses the registered counts, labels (if
+            semi-supervised), niche composition and per-cell-type niche embeddings.
+        inference_outputs
+            Output of :meth:`inference`.
+        generative_outputs
+            Output of :meth:`generative`.
+        kl_weight
+            Weight of the KL divergence on ``z`` (used for KL warmup). The library-size KL
+            term is not scaled by it.
+        classification_ratio
+            Weight of the cell-type classification loss added to the per-cell reconstruction
+            loss. Only used when the model is semi-supervised.
+        epsilon
+            Pseudocount added to the observed niche composition before renormalizing it, so
+            that its Dirichlet log-likelihood is finite.
+        n_samples_mixture
+            Number of posterior samples used for the Monte Carlo estimate of the KL divergence
+            on ``z`` when a mixture prior is used (``prior_mixture=True``).
+
+        Returns
+        -------
+        ``NicheLossOutput`` with the total loss and its
+        expression, niche state, niche composition, KL and (if semi-supervised)
+        classification components.
+        """
         from torch.distributions import kl_divergence
 
         x = tensors[REGISTRY_KEYS.X_KEY]

@@ -29,8 +29,9 @@ class Tangram(SpatialBaseModel):
 
     Parameters
     ----------
-    mdata
+    sc_adata
         MuData object that has been registered via :meth:`~scviva.external.Tangram.setup_mudata`.
+        Despite its name, this is the full MuData (scRNA and spatial modalities).
     constrained
         Whether to use the constrained version of Tangram instead of cells mode.
     target_count
@@ -206,6 +207,8 @@ class Tangram(SpatialBaseModel):
             Key in spatial modality obs for density prior.
         modalities
             Mapping from `setup_mudata` param name to modality in mdata.
+        **kwargs
+            Keyword args for :meth:`~scvi.data.AnnDataManager.register_fields`.
         """
         setup_method_args = cls._get_setup_method_args(**locals())
 

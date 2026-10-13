@@ -42,3 +42,18 @@ Internal base classes and mixins used to build new scviva models.
    nicheVAE
    JVAE
 ```
+
+## Utilities
+
+```{eval-rst}
+.. currentmodule:: scviva.utils
+
+.. autosummary::
+   :toctree: reference/
+   :nosignatures:
+
+   get_spatial_coords
+   validate_spatial_coords
+   resolve_device
+   stats_dtype
+```

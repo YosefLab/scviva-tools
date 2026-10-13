@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from scviva.tools._accessor import adata_delegate
 from scviva.tools.harreman._constants import (
     HARREMAN_DENOISED_LAYER,
     HARREMAN_LATENT_OBSM,
@@ -85,6 +86,17 @@ class HarremanAnalysis:
     layer_key
         Layer to use for counts. ``None`` uses ``adata.X``.
 
+    Notes
+    -----
+    Lower-level functions are grouped under accessors that default to this
+    object's AnnData:
+
+    - ``ha.hs`` -- hotspot analysis, see :class:`~scviva.tools.harreman.HarremanHotspotAccessor`.
+    - ``ha.vs`` -- VISION signatures, see :class:`~scviva.tools.harreman.HarremanVisionAccessor`.
+    - ``ha.tl`` -- graph and interaction tools, see
+      :class:`~scviva.tools.harreman.HarremanToolsAccessor`.
+    - ``ha.pl`` -- plotting, see :class:`~scviva.tools.harreman.HarremanPlottingAccessor`.
+
     Examples
     --------
     Without model:
@@ -127,10 +139,10 @@ class HarremanAnalysis:
 
         self._adata.uns.setdefault(HARREMAN_UNS_KEY, {HARREMAN_PARAMS_KEY: {}})
 
-        self.hs = _HarremanHsAccessor(self)
-        self.vs = _HarremanVsAccessor(self)
-        self.tl = _HarremanTlAccessor(self)
-        self.pl = _HarremanPlAccessor(self)
+        self.hs = HarremanHotspotAccessor(self)
+        self.vs = HarremanVisionAccessor(self)
+        self.tl = HarremanToolsAccessor(self)
+        self.pl = HarremanPlottingAccessor(self)
 
     # ── Model integration ──────────────────────────────────────────────────────
 
@@ -578,8 +590,17 @@ class HarremanAnalysis:
 # ── Accessor classes ───────────────────────────────────────────────────────────
 
 
-class _HarremanHsAccessor:
-    """Hotspot analysis methods accessible as ``ha.hs.<method>``."""
+class HarremanHotspotAccessor:
+    """Hotspot analysis methods accessible as ``ha.hs.<method>``.
+
+    Created automatically by :class:`~scviva.tools.harreman.HarremanAnalysis`;
+    users do not instantiate it directly.
+
+    Parameters
+    ----------
+    ha
+        The analysis object whose AnnData is used when ``adata`` is not passed.
+    """
 
     def __init__(self, ha: HarremanAnalysis) -> None:
         self._ha = ha
@@ -587,51 +608,35 @@ class _HarremanHsAccessor:
     def _resolve(self, adata: AnnData | None) -> AnnData:
         return adata if adata is not None else self._ha._adata
 
-    def compute_local_autocorrelation(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.hotspot.local_autocorrelation import (
-            compute_local_autocorrelation,
-        )
-
-        compute_local_autocorrelation(self._resolve(adata), **kwargs)
-
-    def compute_local_correlation(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.hotspot.local_correlation import compute_local_correlation
-
-        compute_local_correlation(self._resolve(adata), **kwargs)
-
-    def create_modules(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.hotspot.modules import create_modules
-
-        create_modules(self._resolve(adata), **kwargs)
-
-    def calculate_module_scores(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.hotspot.modules import calculate_module_scores
-
-        calculate_module_scores(self._resolve(adata), **kwargs)
-
-    def calculate_super_module_scores(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.hotspot.modules import calculate_super_module_scores
-
-        calculate_super_module_scores(self._resolve(adata), **kwargs)
-
-    def compute_top_scoring_modules(self, adata: AnnData | None = None, **kwargs):
-        from scviva.tools.harreman.hotspot.modules import compute_top_scoring_modules
-
-        return compute_top_scoring_modules(self._resolve(adata), **kwargs)
-
-    def integrate_vision_hotspot_results(self, adata: AnnData | None = None, **kwargs) -> None:
-        """Deprecated alias for :meth:`_HarremanVsAccessor.integrate_vision_hotspot_results`.
-
-        Kept for backward compatibility with code written against the
-        ``ha.hs.`` accessor before this function moved to ``ha.vs.``.
-        """
-        from scviva.tools.harreman.vision._integration import integrate_vision_hotspot_results
-
-        integrate_vision_hotspot_results(self._resolve(adata), **kwargs)
+    _HS = "scviva.tools.harreman.hotspot"
+    compute_local_autocorrelation = adata_delegate(_HS, "compute_local_autocorrelation")
+    compute_local_correlation = adata_delegate(_HS, "compute_local_correlation")
+    create_modules = adata_delegate(_HS, "create_modules")
+    calculate_module_scores = adata_delegate(_HS, "calculate_module_scores")
+    calculate_super_module_scores = adata_delegate(_HS, "calculate_super_module_scores")
+    compute_top_scoring_modules = adata_delegate(_HS, "compute_top_scoring_modules")
+    integrate_vision_hotspot_results = adata_delegate(
+        "scviva.tools.harreman.vision",
+        "integrate_vision_hotspot_results",
+        note=(
+            "Deprecated alias for ``ha.vs.integrate_vision_hotspot_results``, kept for "
+            "backward compatibility with code written before it moved to ``ha.vs``."
+        ),
+    )
+    del _HS
 
 
-class _HarremanVsAccessor:
-    """VISION signature analysis methods accessible as ``ha.vs.<method>``."""
+class HarremanVisionAccessor:
+    """VISION signature analysis methods accessible as ``ha.vs.<method>``.
+
+    Created automatically by :class:`~scviva.tools.harreman.HarremanAnalysis`;
+    users do not instantiate it directly.
+
+    Parameters
+    ----------
+    ha
+        The analysis object whose AnnData is used when ``adata`` is not passed.
+    """
 
     def __init__(self, ha: HarremanAnalysis) -> None:
         self._ha = ha
@@ -647,6 +652,26 @@ class _HarremanVsAccessor:
         use_raw: bool = False,
         **kwargs,
     ) -> None:
+        """Load gene signatures into ``adata.varm``.
+
+        Forwards to :func:`~scviva.tools.vision.load_signatures`, then optionally
+        splits signed signatures with :func:`~scviva.tools.vision.split_signed_signatures`.
+
+        Parameters
+        ----------
+        adata
+            AnnData to use. Defaults to the AnnData held by the analysis object.
+        split_signed
+            Whether to split signed signatures into up/down parts after loading.
+        varm_key
+            Key in ``adata.varm`` where the gene x signature matrix is stored.
+        use_raw
+            Whether to use ``adata.raw`` for gene matching.
+        **kwargs
+            Forwarded to :func:`~scviva.tools.vision.load_signatures`
+            (e.g. ``gmt_files``, ``dicts``, ``min_signature_genes``,
+            ``sig_gene_threshold``).
+        """
         from scviva.tools.vision.tools.signature import load_signatures, split_signed_signatures
 
         resolved = self._resolve(adata)
@@ -655,7 +680,16 @@ class _HarremanVsAccessor:
             split_signed_signatures(resolved, varm_key=varm_key, use_raw=use_raw)
 
     def signatures_from_file(self, adata: AnnData | None = None, **kwargs) -> None:
-        """Alias for :meth:`load_signatures`."""
+        """Alias for :meth:`load_signatures`.
+
+        Parameters
+        ----------
+        adata
+            AnnData to use. Defaults to the AnnData held by the analysis object.
+        **kwargs
+            Forwarded to :meth:`load_signatures` of this accessor (e.g.
+            ``split_signed``, ``varm_key``, ``use_raw``, ``gmt_files``).
+        """
         self.load_signatures(adata, **kwargs)
 
     def compute_vision_signatures(
@@ -666,7 +700,28 @@ class _HarremanVsAccessor:
         signature_names_uns_key: str | None = None,
         **kwargs,
     ) -> None:
-        """Alias for :meth:`analyze_vision` with ``scores_only=True``."""
+        """Alias for :meth:`analyze_vision` with ``scores_only=True``.
+
+        Computes per-cell signature scores only (no KNN graph or
+        autocorrelation).
+
+        Parameters
+        ----------
+        adata
+            AnnData to use. Defaults to the AnnData held by the analysis object.
+        norm_data_key
+            Expression layer to use (``None`` uses ``adata.X``, ``"use_raw"``
+            uses ``adata.raw.X``, any other string is looked up in
+            ``adata.layers``).
+        signature_varm_key
+            Key in ``adata.varm`` for the gene x signature weight matrix.
+        signature_names_uns_key
+            Key in ``adata.uns`` for custom signature column names.
+        **kwargs
+            Forwarded through :meth:`analyze_vision` to
+            :func:`~scviva.tools.vision.tools.signature.compute_signatures_anndata`
+            (e.g. ``device``, ``batch_size``, ``sig_norm_method``).
+        """
         self.analyze_vision(
             adata,
             norm_data_key=norm_data_key,
@@ -676,10 +731,9 @@ class _HarremanVsAccessor:
             **kwargs,
         )
 
-    def integrate_vision_hotspot_results(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.vision._integration import integrate_vision_hotspot_results
-
-        integrate_vision_hotspot_results(self._resolve(adata), **kwargs)
+    integrate_vision_hotspot_results = adata_delegate(
+        "scviva.tools.harreman.vision", "integrate_vision_hotspot_results"
+    )
 
     def analyze_vision(
         self,
@@ -767,8 +821,17 @@ class _HarremanVsAccessor:
             va.compute_differential_expression()
 
 
-class _HarremanTlAccessor:
-    """Tool methods accessible as ``ha.tl.<method>``."""
+class HarremanToolsAccessor:
+    """Tool methods accessible as ``ha.tl.<method>``.
+
+    Created automatically by :class:`~scviva.tools.harreman.HarremanAnalysis`;
+    users do not instantiate it directly.
+
+    Parameters
+    ----------
+    ha
+        The analysis object whose AnnData is used when ``adata`` is not passed.
+    """
 
     def __init__(self, ha: HarremanAnalysis) -> None:
         self._ha = ha
@@ -776,28 +839,26 @@ class _HarremanTlAccessor:
     def _resolve(self, adata: AnnData | None) -> AnnData:
         return adata if adata is not None else self._ha._adata
 
-    def compute_knn_graph(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.tools.knn import compute_knn_graph
-
-        compute_knn_graph(self._resolve(adata), **kwargs)
-
-    def compute_interaction_module_correlation(
-        self, adata: AnnData | None = None, **kwargs
-    ) -> None:
-        from scviva.tools.harreman.tools.cell_communication import (
-            compute_interaction_module_correlation,
-        )
-
-        compute_interaction_module_correlation(self._resolve(adata), **kwargs)
-
-    def select_significant_interactions(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.harreman.tools.cell_communication import select_significant_interactions
-
-        select_significant_interactions(self._resolve(adata), **kwargs)
+    _TL = "scviva.tools.harreman.tools"
+    compute_knn_graph = adata_delegate(_TL, "compute_knn_graph")
+    compute_interaction_module_correlation = adata_delegate(
+        _TL, "compute_interaction_module_correlation"
+    )
+    select_significant_interactions = adata_delegate(_TL, "select_significant_interactions")
+    del _TL
 
 
-class _HarremanPlAccessor:
-    """Plotting methods accessible as ``ha.pl.<method>``."""
+class HarremanPlottingAccessor:
+    """Plotting methods accessible as ``ha.pl.<method>``.
+
+    Created automatically by :class:`~scviva.tools.harreman.HarremanAnalysis`;
+    users do not instantiate it directly.
+
+    Parameters
+    ----------
+    ha
+        The analysis object whose AnnData is used when ``adata`` is not passed.
+    """
 
     def __init__(self, ha: HarremanAnalysis) -> None:
         self._ha = ha
@@ -805,32 +866,13 @@ class _HarremanPlAccessor:
     def _resolve(self, adata: AnnData | None) -> AnnData:
         return adata if adata is not None else self._ha._adata
 
-    def local_correlation_plot(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.plotting.harreman.plots import local_correlation_plot
-
-        local_correlation_plot(self._resolve(adata), **kwargs)
-
-    def average_local_correlation_plot(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.plotting.harreman.plots import average_local_correlation_plot
-
-        average_local_correlation_plot(self._resolve(adata), **kwargs)
-
-    def module_score_correlation_plot(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.plotting.harreman.plots import module_score_correlation_plot
-
-        module_score_correlation_plot(self._resolve(adata), **kwargs)
-
-    def plot_interacting_cell_scores(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.plotting.harreman.plots import plot_interacting_cell_scores
-
-        plot_interacting_cell_scores(self._resolve(adata), **kwargs)
-
-    def plot_ct_interacting_cell_scores(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.plotting.harreman.plots import plot_ct_interacting_cell_scores
-
-        plot_ct_interacting_cell_scores(self._resolve(adata), **kwargs)
-
-    def plot_interaction_module_correlation(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.plotting.harreman.plots import plot_interaction_module_correlation
-
-        plot_interaction_module_correlation(self._resolve(adata), **kwargs)
+    _PL = "scviva.plotting.harreman"
+    local_correlation_plot = adata_delegate(_PL, "local_correlation_plot")
+    average_local_correlation_plot = adata_delegate(_PL, "average_local_correlation_plot")
+    module_score_correlation_plot = adata_delegate(_PL, "module_score_correlation_plot")
+    plot_interacting_cell_scores = adata_delegate(_PL, "plot_interacting_cell_scores")
+    plot_ct_interacting_cell_scores = adata_delegate(_PL, "plot_ct_interacting_cell_scores")
+    plot_interaction_module_correlation = adata_delegate(
+        _PL, "plot_interaction_module_correlation"
+    )
+    del _PL

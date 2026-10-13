@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from scviva.tools._accessor import adata_delegate
 from scviva.tools.vision._constants import (
     CLUSTERS_OBS_KEY,
     META_DIFFERENTIAL_UNS_KEY,
@@ -117,6 +118,11 @@ class VisionAnalysis:
     protein_obsm_key
         Key in ``adata.obsm`` for CITE-seq protein (ADT) data, if any.
 
+    Notes
+    -----
+    Lower-level VISION functions are available as ``va.tl.<method>``, defaulting to
+    this object's AnnData; see :class:`~scviva.tools.vision.VisionToolsAccessor`.
+
     Examples
     --------
     >>> va = VisionAnalysis(adata)
@@ -162,7 +168,7 @@ class VisionAnalysis:
 
         self._adata.uns.setdefault(VISION_UNS_KEY, {VISION_PARAMS_KEY: {}})
 
-        self.tl = _VisionTlAccessor(self)
+        self.tl = VisionToolsAccessor(self)
 
     @staticmethod
     def _infer_obs_columns(adata: AnnData) -> tuple[list[str], list[str]]:
@@ -424,7 +430,21 @@ class VisionAnalysis:
     def compute_latent_space(
         self, max_components: int = 30, use_permutation_wpca: bool = False, **kwargs
     ) -> None:
-        """Compute a PCA latent space, stored as ``adata.obsm["X_pca"]``."""
+        """Compute a PCA latent space, stored as ``adata.obsm["X_pca"]``.
+
+        Parameters
+        ----------
+        max_components
+            Maximum number of principal components to compute.
+        use_permutation_wpca
+            If ``True``, run permutation weighted PCA and keep only the
+            statistically significant components. If ``False``, keep all
+            ``max_components`` components (mirrors R VISION's
+            ``perm_wPCA=FALSE`` default).
+        **kwargs
+            Forwarded to :func:`~scviva.tools.vision.compute_latent_space`
+            (e.g. ``filters``, ``threshold``, ``num_mad``, ``projection_genes``).
+        """
         from scviva.tools.vision.tools.projections import compute_latent_space
 
         compute_latent_space(
@@ -437,7 +457,18 @@ class VisionAnalysis:
         self._completed_steps.add(STEP_LATENT)
 
     def generate_projections(self, methods: list[str] | None = None, **kwargs) -> None:
-        """Generate 2-D visualisation projections (tSNE, UMAP, ISOMap, …)."""
+        """Generate 2-D visualisation projections (tSNE, UMAP, ISOMap, …).
+
+        Parameters
+        ----------
+        methods
+            Projection methods to compute, chosen from ``"tSNE30"``,
+            ``"tSNE10"``, ``"UMAP"``, ``"ISOMap"``, ``"ICA"`` and ``"RBFPCA"``.
+            If ``None``, all six methods are computed.
+        **kwargs
+            Forwarded to :func:`~scviva.tools.vision.generate_projections`
+            (e.g. ``obsm_key``, ``K``, ``projection_genes``).
+        """
         from scviva.tools.vision.tools.projections import (
             _ALL_PROJECTION_METHODS,
             generate_projections,
@@ -450,7 +481,17 @@ class VisionAnalysis:
         )
 
     def pool_cells(self, cells_per_partition: int = 10, **kwargs) -> None:
-        """Micro-cluster ("pool") cells into supercells for scalable analysis."""
+        """Micro-cluster ("pool") cells into supercells for scalable analysis.
+
+        Parameters
+        ----------
+        cells_per_partition
+            Target number of cells per micro-cluster (supercell).
+        **kwargs
+            Forwarded to :func:`~scviva.tools.vision.apply_micro_clustering`
+            (e.g. ``filter_input``, ``filter_threshold``, ``latent_space_key``,
+            ``K``, ``uns_key``).
+        """
         from scviva.tools.vision.tools.microclusters import apply_micro_clustering
 
         apply_micro_clustering(self._adata, cells_per_partition=cells_per_partition, **kwargs)
@@ -635,7 +676,28 @@ class VisionAnalysis:
         self._completed_steps.add(STEP_DE)
 
     def compute_one_vs_one_de(self, key: str, group1: str, group2: str) -> pd.DataFrame:
-        """Wilcoxon one-vs-one differential expression between two groups of ``adata.obs[key]``."""
+        """Wilcoxon one-vs-one differential expression between two groups of ``adata.obs[key]``.
+
+        Full results are also stored in ``adata.uns[f"rank_genes_groups_{key}"]``
+        (overwriting any previous comparison for the same ``key``).
+
+        Parameters
+        ----------
+        key
+            Column of ``adata.obs`` defining the groups.
+        group1
+            Group of ``adata.obs[key]`` to test.
+        group2
+            Reference group of ``adata.obs[key]`` that ``group1`` is compared
+            against.
+
+        Returns
+        -------
+        :class:`pandas.DataFrame`
+            Per-gene results for ``group1`` versus ``group2`` as returned by
+            :func:`scanpy.get.rank_genes_groups_df` (gene names, scores,
+            log fold changes, p-values and adjusted p-values).
+        """
         from scviva.tools.vision.tools.diffexp import rank_genes_groups
 
         rank_genes_groups(
@@ -653,7 +715,23 @@ class VisionAnalysis:
         return sc.get.rank_genes_groups_df(self._adata, group1, key=f"rank_genes_groups_{key}")
 
     def get_gene_expression(self, genes: str | list[str]) -> np.ndarray:
-        """Return the (dense) expression of one or more genes for every cell."""
+        """Return the (dense) expression of one or more genes for every cell.
+
+        Expression is read from ``adata.raw`` when ``norm_data_key == "use_raw"``,
+        from ``adata.X`` when ``norm_data_key`` is ``None``, and from
+        ``adata.layers[norm_data_key]`` otherwise.
+
+        Parameters
+        ----------
+        genes
+            Gene name or list of gene names.
+
+        Returns
+        -------
+        :class:`numpy.ndarray`
+            Dense array of shape ``(n_cells, n_genes)`` (``n_genes == 1`` when a
+            single gene name is given).
+        """
         from scipy.sparse import issparse
 
         adata = self._adata
@@ -666,7 +744,20 @@ class VisionAnalysis:
         return data.toarray() if issparse(data) else np.asarray(data)
 
     def get_genes_by_signature(self, sig_name: str) -> pd.DataFrame:
-        """Genes belonging to signature ``sig_name``, indexed by gene name with +/-1 signs."""
+        """Genes belonging to signature ``sig_name``, indexed by gene name with +/-1 signs.
+
+        Parameters
+        ----------
+        sig_name
+            Name of a signature loaded via :meth:`load_signatures` (or
+            :meth:`attach_signatures`) and scored via :meth:`compute_signatures`.
+
+        Returns
+        -------
+        :class:`pandas.DataFrame`
+            Single-column frame indexed by the genes with a non-zero weight in
+            the signature, holding each gene's signature weight (sign).
+        """
         from scipy.sparse import issparse
 
         adata = self._adata
@@ -1189,8 +1280,17 @@ class VisionAnalysis:
 # ── Accessor classes ──────────────────────────────────────────────────────────
 
 
-class _VisionTlAccessor:
-    """Lower-level VISION tool functions accessible as ``va.tl.<method>``."""
+class VisionToolsAccessor:
+    """Lower-level VISION tool functions accessible as ``va.tl.<method>``.
+
+    Created automatically by :class:`~scviva.tools.vision.VisionAnalysis`;
+    users do not instantiate it directly.
+
+    Parameters
+    ----------
+    va
+        The analysis object whose AnnData is used when ``adata`` is not passed.
+    """
 
     def __init__(self, va: VisionAnalysis) -> None:
         self._va = va
@@ -1198,42 +1298,39 @@ class _VisionTlAccessor:
     def _resolve(self, adata: AnnData | None) -> AnnData:
         return adata if adata is not None else self._va._adata
 
-    def compute_knn_weights(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.vision.tools.knn import compute_knn_weights_anndata
-
-        compute_knn_weights_anndata(self._resolve(adata), **kwargs)
-
-    def compute_plasticity_scores(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.vision.phylo import compute_plasticity_scores
-
-        compute_plasticity_scores(self._resolve(adata), **kwargs)
-
-    def cluster_cells_tree(self, adata: AnnData | None = None, **kwargs) -> None:
-        from scviva.tools.vision.phylo import cluster_cells_tree
-
-        cluster_cells_tree(self._resolve(adata), **kwargs)
-
-    def apply_micro_clustering(self, adata: AnnData | None = None, **kwargs):
-        from scviva.tools.vision.tools.microclusters import apply_micro_clustering
-
-        return apply_micro_clustering(self._resolve(adata), **kwargs)
-
-    def pool_matrix(self, adata: AnnData | None = None, **kwargs):
-        from scviva.tools.vision.tools.microclusters import pool_matrix_anndata
-
-        return pool_matrix_anndata(self._resolve(adata), **kwargs)
-
-    def pool_metadata(self, adata: AnnData | None = None, **kwargs):
-        from scviva.tools.vision.tools.microclusters import pool_metadata_anndata
-
-        return pool_metadata_anndata(self._resolve(adata), **kwargs)
-
-    def generate_projections(self, adata: AnnData | None = None, **kwargs):
-        from scviva.tools.vision.tools.projections import generate_projections
-
-        return generate_projections(self._resolve(adata), **kwargs)
+    compute_knn_weights = adata_delegate(
+        "scviva.tools.vision.tools.knn", "compute_knn_weights_anndata"
+    )
+    compute_plasticity_scores = adata_delegate(
+        "scviva.tools.vision.phylo", "compute_plasticity_scores"
+    )
+    cluster_cells_tree = adata_delegate("scviva.tools.vision.phylo", "cluster_cells_tree")
+    apply_micro_clustering = adata_delegate(
+        "scviva.tools.vision.tools.microclusters", "apply_micro_clustering"
+    )
+    pool_matrix = adata_delegate("scviva.tools.vision.tools.microclusters", "pool_matrix_anndata")
+    pool_metadata = adata_delegate(
+        "scviva.tools.vision.tools.microclusters", "pool_metadata_anndata"
+    )
+    generate_projections = adata_delegate(
+        "scviva.tools.vision.tools.projections", "generate_projections"
+    )
 
     def rank_genes_groups(self, adata: AnnData | None = None, **kwargs):
+        """Rank genes for characterizing groups.
+
+        Forwards to :func:`~scviva.tools.vision.rank_genes_groups` (imported lazily
+        because it depends on scanpy). ``adata`` defaults to the AnnData held by the
+        analysis object.
+
+        Parameters
+        ----------
+        adata
+            AnnData to use. Defaults to the analysis object's AnnData.
+        **kwargs
+            Keyword arguments forwarded to :func:`~scviva.tools.vision.rank_genes_groups`
+            (e.g. ``groupby``, ``method``, ``reference``, ``n_genes``).
+        """
         from scviva.tools.vision.tools.diffexp import rank_genes_groups
 
         return rank_genes_groups(self._resolve(adata), **kwargs)

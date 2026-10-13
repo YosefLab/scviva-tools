@@ -52,12 +52,16 @@ class DestVI(
         state_dict from the px_decoder of the CondSCVI model
     px_r
         parameters for the px_r tensor in the CondSCVI model
+    per_ct_bias
+        estimates of per cell-type expression bias in the CondSCVI model
     n_hidden
         Number of nodes per hidden layer.
     n_latent
         Dimensionality of the latent space.
     n_layers
         Number of hidden layers used for encoder and decoder NNs.
+    dropout_decoder
+        Dropout rate for the decoder neural network (same dropout as in CondSCVI decoder).
     **module_kwargs
         Keyword args for :class:`~scviva.module.MRDeconv`
 
@@ -141,8 +145,9 @@ class DestVI(
             number of mixture parameter for VampPrior calculations
         anndata_setup_kwargs
             Keyword args for :meth:`~scviva.model.DestVI.setup_anndata`
-        **model_kwargs
-            Keyword args for :class:`~scviva.model.DestVI`
+        **module_kwargs
+            Keyword args for :class:`~scviva.model.DestVI`, forwarded to
+            :class:`~scviva.module.MRDeconv`
         """
         attr_dict, var_names, load_state_dict, _ = _get_loaded_data(sc_model)
         registry = attr_dict.pop("registry_")
@@ -431,6 +436,9 @@ class DestVI(
             If `True`, ignores `give_mean` and `mc_samples`. In the case of the latter,
             `mc_samples` is used to compute the mean of a transformed distribution.
             If `return_dist` is true the untransformed mean and variance are returned.
+        backend
+            ``"cpu"`` (default) returns :class:`~numpy.ndarray` output; ``"rapids"`` returns
+            :class:`cupy.ndarray` output (requires ``cupy``).
 
         Returns
         -------
@@ -692,6 +700,8 @@ class DestVI(
             neighborhood, yielding spatially smoother deconvolution.
             Optional; if ``None`` the regularization is disabled.
         %(param_batch_key)s
+        **kwargs
+            Keyword args for :meth:`~scvi.data.AnnDataManager.register_fields`.
         """
         setup_method_args = cls._get_setup_method_args(**locals())
         # add index for each cell (provided to pyro plate for correct minibatching)

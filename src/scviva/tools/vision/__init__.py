@@ -1,4 +1,4 @@
-from ._analysis import VisionAnalysis
+from ._analysis import VisionAnalysis, VisionToolsAccessor
 from ._results import VisionResults
 from .phylo import cluster_cells_tree, compute_plasticity_scores
 from .preprocessing import (
@@ -44,6 +44,7 @@ __all__ = [
     "NormData",
     "VisionAnalysis",
     "VisionResults",
+    "VisionToolsAccessor",
     "apply_filters",
     "apply_ica",
     "apply_isomap",

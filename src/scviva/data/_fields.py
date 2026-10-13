@@ -21,6 +21,22 @@ class SpatialCoordsField(ObsmField):
         super().__init__(registry_key=obsm_key, attr_key=obsm_key)
 
     def get_field_data(self, adata):
+        """Get the spatial coordinates from ``adata.obsm`` and validate their dimensionality.
+
+        Parameters
+        ----------
+        adata
+            AnnData object containing the coordinates in ``adata.obsm[obsm_key]``.
+
+        Returns
+        -------
+        The coordinate array, with shape ``(n_obs, 2)`` or ``(n_obs, 3)``.
+
+        Raises
+        ------
+        ValueError
+            If the coordinates do not have 2 or 3 columns.
+        """
         data = super().get_field_data(adata)
         if data.shape[1] not in (2, 3):
             raise ValueError(
@@ -47,6 +63,17 @@ class NeighborhoodGraphField(ObsmField):
         super().__init__(registry_key=obsm_key, attr_key=obsm_key)
 
     def get_field_data(self, adata):
+        """Get the neighbor graph array from ``adata.obsm`` as a dense numpy array.
+
+        Parameters
+        ----------
+        adata
+            AnnData object containing the neighbor array in ``adata.obsm[obsm_key]``.
+
+        Returns
+        -------
+        Dense :class:`~numpy.ndarray`; sparse inputs are converted with ``toarray()``.
+        """
         data = super().get_field_data(adata)
         # Squidpy returns CSR; convert to dense for AnnDataManager compatibility
         if hasattr(data, "toarray"):
