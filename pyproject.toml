@@ -104,6 +104,7 @@ doc = [
   "sphinx-copybutton",
   "sphinx-design",
   "sphinxcontrib-bibtex",
+  "torch-geometric",
 ]
 
 [tool.hatch]
