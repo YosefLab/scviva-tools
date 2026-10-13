@@ -550,7 +550,8 @@ def rank_genes_groups(
         The number of genes that appear in the returned tables.
         Defaults to all genes.
     method
-        `'wilcoxon'` uses Wilcoxon rank-sum,
+        Statistical test. Only `'wilcoxon'` (Wilcoxon rank-sum) is supported;
+        `None` also selects it. Any other value raises a :class:`ValueError`.
     corr_method
         p-value correction method.
     tie_correct
@@ -563,9 +564,13 @@ def rank_genes_groups(
         Compute the fraction of cells expressing the genes.
     key_added
         The key in `adata.uns` information is saved to.
+    copy
+        If `True`, operate on and return a copy of `adata`; otherwise modify
+        `adata` in place and return `None`.
     **kwds
-        Are passed to test methods. Currently this affects only parameters that
-        are passed to :class:`sklearn.linear_model.LogisticRegression`.
+        Accepted for compatibility with scanpy's signature. The legacy
+        ``only_positive`` key is honoured (as the inverse of ``rankby_abs``);
+        other keys are ignored by the Wilcoxon test.
         For instance, you can pass `penalty='l1'` to try to come up with a
         minimal set of genes that are good predictors (sparse solution meaning
         few non-zero fitted coefficients).
@@ -602,16 +607,14 @@ def rank_genes_groups(
     <https://github.com/theislab/scanpy/blob/master/scanpy/tests/test_rank_genes_groups.py>`__.
     """
     if method is None:
-        logg.warning(
-            "Default of the method has been changed to 't-test' from 't-test_overestim_var'"
-        )
-        method = "t-test"
+        method = "wilcoxon"
 
     if "only_positive" in kwds:
         rankby_abs = not kwds.pop("only_positive")  # backwards compat
 
     start = logg.info("ranking genes")
-    avail_methods = {"t-test", "t-test_overestim_var", "wilcoxon", "logreg"}
+    # Only the Wilcoxon test is ported from scanpy; see `_RankGenes.compute_statistics`.
+    avail_methods = {"wilcoxon"}
     if method not in avail_methods:
         raise ValueError(f"Method must be one of {avail_methods}.")
 

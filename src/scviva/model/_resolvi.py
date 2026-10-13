@@ -60,6 +60,8 @@ class ResolVI(
         AnnData object that has been registered via :meth:`~scviva.model.ResolVI.setup_anndata`.
     n_hidden
         Number of nodes per hidden layer.
+    n_hidden_encoder
+        Number of nodes per hidden layer in the encoder.
     n_latent
         Dimensionality of the latent space.
     n_layers
@@ -76,6 +78,21 @@ class ResolVI(
 
         * ``'nb'`` - Negative binomial distribution
         * ``'poisson'`` - Poisson distribution
+    background_ratio
+        Prior for the background proportion. If ``None``, estimated from the data via
+        :meth:`compute_dataset_dependent_priors`.
+    median_distance
+        Kernel size in the RBF kernel used to weight distances between cells and their
+        neighbors. If ``None``, estimated from the data via
+        :meth:`compute_dataset_dependent_priors`.
+    semisupervised
+        Whether to use a semi-supervised model using the labels registered via
+        ``labels_key``.
+    mixture_k
+        Number of components in the Mixture-of-Gaussian prior.
+    downsample_counts
+        Whether to downsample counts during training using a log-normal library size
+        distribution estimated from the data.
     **model_kwargs
         Keyword args for :class:`~scviva.module.RESOLVAE`
 
@@ -202,6 +219,9 @@ class ResolVI(
             Minibatch size. Defaults to ``scvi.settings.batch_size``.
         return_dist
             Return distribution parameters instead of sampled values.
+        backend
+            ``"cpu"`` (default) returns :class:`~numpy.ndarray` output; ``"rapids"`` returns
+            :class:`cupy.ndarray` output (requires ``cupy``).
 
         Returns
         -------
@@ -453,6 +473,8 @@ class ResolVI(
             Return :class:`~numpy.ndarray` instead of :class:`~pandas.DataFrame`.
         silent
             Suppress progress bar.
+        **kwargs
+            Additional keyword arguments. Currently unused.
 
         Returns
         -------
@@ -767,6 +789,8 @@ class ResolVI(
         prepare_data_kwargs
             Keyword args for :meth:`_prepare_data` (e.g. ``n_neighbors``, ``spatial_rep``).
         %(param_unlabeled_category)s
+        **kwargs
+            Keyword args for :meth:`~scvi.data.AnnDataManager.register_fields`.
         """
         setup_method_args = cls._get_setup_method_args(**locals())
         x = adata.X if layer is None else adata.layers[layer]
@@ -830,7 +854,20 @@ class ResolVI(
         cls.register_manager(adata_manager)
 
     def compute_dataset_dependent_priors(self, n_small_genes=None):
-        """Compute dataset-dependent priors for background ratio and median distance."""
+        """Compute dataset-dependent priors for background ratio and median distance.
+
+        Parameters
+        ----------
+        n_small_genes
+            Number of lowest-total-count genes whose per-cell mean expression (relative to the
+            cell's mean expression over all genes) is averaged to estimate the background ratio.
+            If ``None``, defaults to ``n_genes // 50``.
+
+        Returns
+        -------
+        Dictionary with keys ``"background_ratio"``, ``"median_distance"``,
+        ``"mean_log_counts"`` and ``"std_log_counts"``.
+        """
         x = self.adata_manager.get_from_registry(REGISTRY_KEYS.X_KEY)
         n_small_genes = x.shape[1] // 50 if n_small_genes is None else int(n_small_genes)
         smallest_means = x[:, np.array(x.sum(0)).flatten().argsort()[:n_small_genes]].mean(

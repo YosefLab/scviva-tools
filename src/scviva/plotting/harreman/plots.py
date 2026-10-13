@@ -1050,7 +1050,46 @@ def plot_interaction_module_correlation(
     figsize: tuple | None = (10, 10),
     threshold: float | None = None,
 ):
-    """Plot interaction-module correlation heatmap."""
+    """Plot interaction-module correlation heatmap.
+
+    Draws a clustered heatmap of correlation coefficients between interactions (rows) and
+    modules (columns). Only interactions with at least one significant correlation
+    (adjusted p-value or p-value < 0.05) are kept, non-significant entries are masked,
+    and significant entries are annotated with ``*`` (< 0.05), ``**`` (< 0.005) or
+    ``***`` (< 0.0005).
+
+    Parameters
+    ----------
+    adata : AnnData
+        AnnData object containing (as produced by
+        ``harreman.tl.compute_interaction_module_correlation``):
+
+        - ``uns['interaction_module_correlation_coefs']``: DataFrame of correlation
+          coefficients (modules x interactions)
+        - ``uns['interaction_module_correlation_FDR']`` or
+          ``uns['interaction_module_correlation_pvals']``: matching DataFrame of
+          adjusted p-values or p-values
+        - ``uns['cor_method']``: correlation method, used to label the colorbar
+          (``"Spearman R"`` if ``"spearman"``, else ``"Pearson R"``)
+    x_rotation : int, default 0
+        Rotation (in degrees) of the x-axis (module) tick labels.
+    y_rotation : int, default 0
+        Rotation (in degrees) of the y-axis (interaction) tick labels.
+    use_FDR : bool, default True
+        If True, use ``uns['interaction_module_correlation_FDR']`` for significance;
+        otherwise use ``uns['interaction_module_correlation_pvals']``.
+    subset_interactions : list, optional
+        Interactions (rows) to restrict the plot to. If None, all interactions are used.
+    subset_modules : list, optional
+        Modules (columns) to restrict the plot to. If None, all modules are used.
+    cmap : str, default "RdBu_r"
+        Colormap for the heatmap.
+    figsize : tuple, default (10, 10)
+        Figure size passed to :func:`seaborn.clustermap`.
+    threshold : float, optional
+        If set, keep only interactions with a significant coefficient greater than
+        ``threshold`` for at least one module.
+    """
     coef = (
         adata.uns["interaction_module_correlation_coefs"].T
         if "interaction_module_correlation_coefs" in adata.uns.keys()

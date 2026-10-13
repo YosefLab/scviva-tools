@@ -544,7 +544,9 @@ def select_significant_interactions(
     ----------
     adata : AnnData
         AnnData object containing:
+
         - ``uns['ccc_results']`` or ``uns['ct_ccc_results']``, each of which includes:
+
             * ``cell_com_df_gp``: DataFrame with statistics for gene pairs
             * ``cell_com_df_m``:  DataFrame with statistics for metabolites
     ct_aware : bool, default False

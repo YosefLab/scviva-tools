@@ -166,7 +166,23 @@ class JVAE(BaseModuleClass):
     def sample_from_posterior_z(
         self, x: torch.Tensor, mode: int = None, deterministic: bool = False
     ) -> torch.Tensor:
-        """Sample tensor of latent values from the posterior."""
+        """Sample tensor of latent values from the posterior.
+
+        Parameters
+        ----------
+        x
+            Tensor of counts with shape ``(n_cells, n_genes_mode)``, where ``n_genes_mode`` is
+            the number of genes of dataset ``mode``.
+        mode
+            Index of the dataset (encoder head) ``x`` comes from. May be ``None`` only when the
+            model has a single dataset, in which case ``0`` is used.
+        deterministic
+            If ``True``, return the posterior mean instead of a sample.
+
+        Returns
+        -------
+        Tensor of latent values with shape ``(n_cells, n_latent)``.
+        """
         if mode is None:
             if len(self.n_input_list) == 1:
                 mode = 0
@@ -182,7 +198,24 @@ class JVAE(BaseModuleClass):
     def sample_from_posterior_l(
         self, x: torch.Tensor, mode: int = None, deterministic: bool = False
     ) -> torch.Tensor:
-        """Sample the tensor of library sizes from the posterior."""
+        """Sample the tensor of library sizes from the posterior.
+
+        Parameters
+        ----------
+        x
+            Tensor of counts with shape ``(n_cells, n_genes_mode)``, where ``n_genes_mode`` is
+            the number of genes of dataset ``mode``.
+        mode
+            Index of the dataset (encoder head) ``x`` comes from.
+        deterministic
+            If ``True`` and the library size is modeled for this dataset, return the posterior
+            mean of the log library size instead of a sample. If the library size is not
+            modeled, the observed log library size is returned regardless.
+
+        Returns
+        -------
+        Tensor of log library sizes with shape ``(n_cells, 1)``.
+        """
         inference_out = self.inference(x, mode)
         return (
             inference_out["ql"].loc
@@ -199,14 +232,51 @@ class JVAE(BaseModuleClass):
         deterministic: bool = False,
         decode_mode: int | None = None,
     ) -> torch.Tensor:
-        """Return the tensor of predicted frequencies of expression."""
+        """Return the tensor of predicted frequencies of expression.
+
+        Parameters
+        ----------
+        x
+            Tensor of counts with shape ``(n_cells, n_genes_mode)``, where ``n_genes_mode`` is
+            the number of genes of dataset ``mode``.
+        mode
+            Index of the dataset (encoder head) ``x`` comes from.
+        batch_index
+            Batch index of each cell, with shape ``(n_cells, 1)``.
+        y
+            Label of each cell, with shape ``(n_cells, 1)``. Required when
+            ``dispersion="gene-label"``.
+        deterministic
+            If ``True``, use the posterior means of ``z`` and of the library size (when the
+            library is modeled) instead of samples.
+        decode_mode
+            Index of the dataset whose decoder head is used. If ``None``, defaults to ``mode``.
+
+        Returns
+        -------
+        Tensor of normalized expression frequencies with shape ``(n_cells, total_genes)``.
+        """
         gen_out = self._run_forward(
             x, mode, batch_index, y=y, deterministic=deterministic, decode_mode=decode_mode
         )
         return gen_out["px_scale"]
 
     def get_sample_rate(self, x, batch_index, *_, **__):
-        """Get the sample rate for the model."""
+        """Get the sample rate for the model.
+
+        Encodes and decodes ``x`` with dataset ``0`` (see :meth:`sample_rate`).
+
+        Parameters
+        ----------
+        x
+            Tensor of counts for dataset ``0`` with shape ``(n_cells, n_genes_0)``.
+        batch_index
+            Batch index of each cell, with shape ``(n_cells, 1)``.
+        *_
+            Ignored; accepted for interface compatibility.
+        **__
+            Ignored; accepted for interface compatibility.
+        """
         return self.sample_rate(x, 0, batch_index)
 
     def _run_forward(
@@ -243,7 +313,31 @@ class JVAE(BaseModuleClass):
         deterministic: bool = False,
         decode_mode: int = None,
     ) -> torch.Tensor:
-        """Return the tensor of scaled frequencies of expression."""
+        """Return the tensor of scaled frequencies of expression.
+
+        Parameters
+        ----------
+        x
+            Tensor of counts with shape ``(n_cells, n_genes_mode)``, where ``n_genes_mode`` is
+            the number of genes of dataset ``mode``.
+        mode
+            Index of the dataset (encoder head) ``x`` comes from.
+        batch_index
+            Batch index of each cell, with shape ``(n_cells, 1)``.
+        y
+            Label of each cell, with shape ``(n_cells, 1)``. Required when
+            ``dispersion="gene-label"``.
+        deterministic
+            If ``True``, use the posterior means of ``z`` and of the library size (when the
+            library is modeled) instead of samples.
+        decode_mode
+            Index of the dataset whose decoder head is used. If ``None``, defaults to ``mode``.
+
+        Returns
+        -------
+        Tensor of expected counts (``px_scale`` times library size) with shape
+        ``(n_cells, total_genes)``.
+        """
         gen_out = self._run_forward(
             x, mode, batch_index, y=y, deterministic=deterministic, decode_mode=decode_mode
         )
@@ -257,7 +351,28 @@ class JVAE(BaseModuleClass):
         px_dropout: torch.Tensor,
         mode: int,
     ) -> torch.Tensor:
-        """Compute the reconstruction loss."""
+        """Compute the reconstruction loss.
+
+        Parameters
+        ----------
+        x
+            Tensor of counts with shape ``(n_cells, n_genes_mode)``, where ``n_genes_mode`` is
+            the number of genes of dataset ``mode``.
+        px_rate
+            Mean of the count distribution, restricted to the genes of dataset ``mode``.
+        px_r
+            Inverse dispersion of the count distribution, restricted to the genes of dataset
+            ``mode``.
+        px_dropout
+            Logits of the zero-inflation probability, restricted to the genes of dataset
+            ``mode``. Only used when the gene likelihood is ``"zinb"``.
+        mode
+            Index of the dataset; selects the gene likelihood from ``gene_likelihoods``.
+
+        Returns
+        -------
+        Negative log-likelihood per cell with shape ``(n_cells,)``.
+        """
         reconstruction_loss = None
         if self.gene_likelihoods[mode] == "zinb":
             reconstruction_loss = (
@@ -296,7 +411,27 @@ class JVAE(BaseModuleClass):
         n_samples: int | None = 1,
         batch_index: torch.Tensor | None = None,
     ) -> dict:
-        """Run the inference model."""
+        """Run the inference model.
+
+        Parameters
+        ----------
+        x
+            Tensor of counts with shape ``(n_cells, n_genes_mode)``, where ``n_genes_mode`` is
+            the number of genes of dataset ``mode``.
+        mode
+            Index of the dataset (encoder head) ``x`` comes from.
+        n_samples
+            Number of samples of ``z`` to draw from the posterior. If greater than ``1``,
+            ``z`` gains a leading sample dimension.
+        batch_index
+            Batch index of each cell. Unused; accepted for interface compatibility.
+
+        Returns
+        -------
+        Dictionary with keys ``"qz"`` (posterior over ``z``), ``"z"``, ``"ql"`` (posterior
+        over the log library size, or ``None`` if the library is not modeled) and
+        ``"library"`` (sampled or observed log library size).
+        """
         x_ = x
         if self.log_variational:
             x_ = torch.log(1 + x_)
@@ -324,7 +459,32 @@ class JVAE(BaseModuleClass):
         mode: int | None = 0,
         transform_batch: torch.Tensor | None = None,
     ) -> dict:
-        """Run the generative model."""
+        """Run the generative model.
+
+        Parameters
+        ----------
+        z
+            Latent values with shape ``(n_cells, n_latent)``.
+        library
+            Log library size with shape ``(n_cells, 1)``.
+        batch_index
+            Batch index of each cell, with shape ``(n_cells, 1)``. Used by the decoder and,
+            when ``dispersion="gene-batch"``, to select the dispersion.
+        y
+            Label of each cell, with shape ``(n_cells, 1)``. Used when
+            ``dispersion="gene-label"`` to select the dispersion.
+        mode
+            Index of the dataset whose decoder head is used. ``px_scale`` is normalized over
+            the genes of this dataset.
+        transform_batch
+            If not ``None``, the ``"batch_index"`` entry of the returned dictionary is replaced
+            by this value. It does not affect the decoded quantities.
+
+        Returns
+        -------
+        Dictionary with keys ``"px_scale"``, ``"px"``, ``"px_r"``, ``"px_rate"``,
+        ``"px_dropout"`` and ``"batch_index"``.
+        """
         px_scale, px_r, px_rate, px_dropout = self.decoder(
             z, mode, library, self.dispersion, batch_index, y
         )
@@ -363,7 +523,27 @@ class JVAE(BaseModuleClass):
         mode: int | None = None,
         kl_weight: float = 1.0,
     ) -> LossOutput:
-        """Return the reconstruction loss and the Kullback divergences."""
+        """Return the reconstruction loss and the Kullback divergences.
+
+        Parameters
+        ----------
+        tensors
+            Dictionary of minibatch tensors; uses the registered counts and batch index.
+        inference_outputs
+            Output of :meth:`inference`.
+        generative_outputs
+            Output of :meth:`generative`.
+        mode
+            Index of the dataset the minibatch comes from. May be ``None`` only when the
+            model has a single dataset, in which case ``0`` is used.
+        kl_weight
+            Weight of the KL divergence terms (``z`` and, if modeled, library size).
+
+        Returns
+        -------
+        :class:`~scvi.module.base.LossOutput` with the total loss, per-cell reconstruction
+        loss and per-cell local KL divergence.
+        """
         if mode is None:
             if len(self.n_input_list) == 1:
                 mode = 0

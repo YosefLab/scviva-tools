@@ -459,6 +459,9 @@ class GIMVI(SpatialBaseModel):
             If True, also saves the anndata objects.
         save_kwargs
             Keyword arguments passed into :func:`~torch.save`.
+        **anndata_write_kwargs
+            Keyword arguments passed into :meth:`~anndata.AnnData.write` when
+            ``save_anndata=True``.
         """
         if not os.path.exists(dir_path) or overwrite:
             os.makedirs(dir_path, exist_ok=overwrite)
@@ -473,8 +476,14 @@ class GIMVI(SpatialBaseModel):
         seq_adata = self.adatas[0]
         spatial_adata = self.adatas[1]
         if save_anndata:
-            seq_adata.write(os.path.join(dir_path, f"{file_name_prefix}adata_seq.h5ad"))
-            spatial_adata.write(os.path.join(dir_path, f"{file_name_prefix}adata_spatial.h5ad"))
+            seq_adata.write(
+                os.path.join(dir_path, f"{file_name_prefix}adata_seq.h5ad"),
+                **anndata_write_kwargs,
+            )
+            spatial_adata.write(
+                os.path.join(dir_path, f"{file_name_prefix}adata_spatial.h5ad"),
+                **anndata_write_kwargs,
+            )
 
         model_state_dict = self.module.state_dict()
         seq_var_names = seq_adata.var_names.astype(str).to_numpy()
@@ -680,9 +689,12 @@ class GIMVI(SpatialBaseModel):
 
         Parameters
         ----------
+        %(param_adata)s
         %(param_batch_key)s
         %(param_labels_key)s
         %(param_layer)s
+        **kwargs
+            Keyword args for :meth:`~scvi.data.AnnDataManager.register_fields`.
         """
         setup_method_args = cls._get_setup_method_args(**locals())
         anndata_fields = [

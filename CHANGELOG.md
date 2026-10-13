@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Harreman and VISION accessor methods now expose their real arguments.** The
+  `ha.hs`, `ha.vs`, `ha.tl`, `ha.pl` (`HarremanAnalysis`) and `va.tl` (`VisionAnalysis`)
+  methods were `(adata=None, **kwargs)` wrappers without docstrings, so `help()`, IDE
+  tooltips and the API docs showed no arguments. They are now built by a new
+  `scviva.tools._accessor.adata_delegate` helper that copies the signature and docstring
+  of the forwarded function (`adata` optional, remaining arguments keyword-only). Call
+  syntax is unchanged and existing code and tutorials keep working.
+- Accessor classes renamed to public names and exported:
+  `scviva.tools.harreman.HarremanHotspotAccessor`, `HarremanVisionAccessor`,
+  `HarremanToolsAccessor`, `HarremanPlottingAccessor`, and
+  `scviva.tools.vision.VisionToolsAccessor`.
+
+### Documentation
+
+- New "Analysis accessors" section in the User API listing the accessor classes.
+- Added an autosummary class template (`docs/_templates/autosummary/class.rst`) so class
+  pages render full documentation for every method and attribute, not only a table of
+  names. Methods that `scviva.module.*` classes inherit from `torch.nn.Module` are left
+  out to keep those pages readable.
+- User/Developer API pages now list every public object: `DIAGVI`, the VISION plotting
+  functions (`scviva.pl.vision.*`), the `scviva.tools.vision` functions and containers,
+  the Harreman hotspot/tools/preprocessing/datasets functions, and `scviva.utils`.
+- Docstrings (text only, no signature or behavior changes): documented the missing
+  constructor arguments of `DestVI`, `ResolVI`, `Tangram`, `nicheVAE`, `NicheDecoder`,
+  `VisionResults` and the accessor classes; documented where `**kwargs` are forwarded in
+  model constructors, `setup_anndata`/`from_rna_model`/`from_spatialdata` and other model
+  methods, `VisionAnalysis.compute_latent_space`/`generate_projections`/`pool_cells`, and
+  `scviva.tools.vision.rank_genes_groups`; fixed parameter names in docstrings that no
+  longer matched the signature (`DestVI.from_rna_model` `**module_kwargs`, `Tangram`
+  `sc_adata`, `NicheDecoder.forward` `*cat_list`).
+- Fixed RST list formatting in the `calculate_super_module_scores`,
+  `select_significant_interactions` and `DIAGVI.train` docstrings, and added the
+  `Boyeau19` and `Ionides2008` references cited by inherited scvi-tools docstrings, so the
+  docs build (`-W`) stays warning-free now that every method is rendered.
+- Completed the remaining parameter documentation (text only, no signature changes) for
+  the VISION plotting functions, `plot_interaction_module_correlation`,
+  `plot_connectivity_distribution`, `VisionAnalysis` methods, `SCVIVA.setup_anndata` and
+  `get_latent_representation`, `DIAGVI.from_spatialdata`/`predict_celltype`, the `JVAE`
+  and `nicheVAE` module methods, `create_modules`, `rank_genes_groups`,
+  `resolve_device`/`stats_dtype`, and the `setup_anndata` methods of `GIMVI` and the
+  Stereoscope models; added docstrings to `DirichletDecoder.forward` and the
+  `get_field_data` methods of the spatial data fields.
+
+### Fixed
+
+- `GIMVI.save(..., save_anndata=True, **anndata_write_kwargs)` now passes
+  `anndata_write_kwargs` (e.g. `compression="gzip"`) to `AnnData.write`; they were
+  previously accepted and silently ignored.
+- `scviva.tools.vision.rank_genes_groups` now raises a clear `ValueError` for
+  `method="t-test"`, `"t-test_overestim_var"` or `"logreg"`, which were advertised but
+  never ported (they failed with an `AttributeError`). `method=None` now selects
+  `"wilcoxon"` instead of the unported `"t-test"`. Signatures are unchanged.
+
 ## [0.1.7] - 2026-09-10
 
 ### Added

@@ -440,6 +440,8 @@ def create_modules(
     core_only : bool, optional (default: False)
         If True, assigns only tightly correlated (core) genes to modules and leaves others
         unassigned.
+    verbose : bool, optional (default: False)
+        If True, print progress messages and the elapsed time.
 
     Returns
     -------
@@ -601,6 +603,7 @@ def calculate_super_module_scores(
     -------
     None
         The following results are stored in the `AnnData` object:
+
         - `adata.obsm['super_module_scores']`: (cells x super-modules) DataFrame with
           per-cell super-module activity scores
         - `adata.varm['gene_loadings_sm']`: (genes x super-modules) DataFrame with gene

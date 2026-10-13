@@ -35,6 +35,28 @@ extensions = [
 ]
 
 autosummary_generate = True
+
+
+def _torch_inherited_members() -> list[str]:
+    """Return ``"<class fullname>.<member>"`` for members scviva.module classes get from torch.
+
+    Used by _templates/autosummary/class.rst to hide the dozens of members that
+    nn.Module subclasses inherit from torch (e.g. ``cuda``, ``zero_grad``). Kept as a
+    plain list so Sphinx can pickle the config.
+    """
+    import scviva.module
+
+    out = []
+    for name in scviva.module.__all__:
+        cls = getattr(scviva.module, name)
+        for member in dir(cls):
+            owner = next((c for c in cls.__mro__ if member in vars(c)), None)
+            if owner is not None and owner.__module__.startswith("torch"):
+                out.append(f"scviva.module.{name}.{member}")
+    return sorted(out)
+
+
+autosummary_context = {"torch_inherited": _torch_inherited_members()}
 autodoc_member_order = "bysource"
 bibtex_bibfiles = ["references.bib"]
 bibtex_reference_style = "author_year"
