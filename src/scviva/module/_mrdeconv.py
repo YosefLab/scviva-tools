@@ -243,6 +243,21 @@ class MRDeconv(EmbeddingModuleMixin, BaseModuleClass):
             torch.nn.Linear(n_hidden, n_labels + self.add_celltypes),
         )
 
+    @property
+    def qz_prior(self) -> MixtureSameFamily:
+        """VampPrior mixture over the cell-type specific latent space.
+
+        Built from the registered buffers on every access, so it follows the module to the
+        device and dtype set by ``.to()``; a distribution stored at ``__init__`` would stay
+        on the CPU.
+        """
+        cats = Categorical(probs=self.mp_vprior)
+        normal_dists = Independent(
+            Normal(self.mean_vprior, torch.sqrt(self.var_vprior) + 1e-4),
+            reinterpreted_batch_ndims=1,
+        )
+        return MixtureSameFamily(cats, normal_dists)
+
     def _get_inference_input(self, tensors):
         x = tensors[REGISTRY_KEYS.X_KEY]
         x_smoothed = tensors.get("x_smoothed", None)

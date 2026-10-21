@@ -20,7 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scviva.tools.harreman.HarremanHotspotAccessor`, `HarremanVisionAccessor`,
   `HarremanToolsAccessor`, `HarremanPlottingAccessor`, and
   `scviva.tools.vision.VisionToolsAccessor`.
-
+- Fix {meth}`scviva.model.DestVI.from_rna_model` with a {class}`scvi.model.CondSCVI` trained with
+    the default `prior="normal"`: it raised a `KeyError` when `prior` was not passed explicitly and
+    a `TypeError` because the VampPrior from {meth}`scvi.model.CondSCVI.get_vamp_prior` was
+    registered as numpy buffers. The VampPrior of {class}`scviva.module.MRDeconv` is now built from
+    its buffers, so it follows the module to GPU and MPS devices.
+-
 ### Documentation
 
 - New "Analysis accessors" section in the User API listing the accessor classes.
