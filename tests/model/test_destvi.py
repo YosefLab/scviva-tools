@@ -5,11 +5,12 @@ import types
 
 import numpy as np
 import pytest
+import torch
 from scvi.data import synthetic_iid
 from scvi.model import CondSCVI
 
 from scviva.model._destvi import DestVI
-import torch
+
 
 @pytest.fixture(scope="session")
 def destvi_data():
@@ -108,6 +109,7 @@ def test_destvi_validation():
         model.train(max_epochs=2, early_stopping=True)
     # train_size=1.0 (all spots trained) must still work
     model.train(max_epochs=1)
+
 
 @pytest.mark.parametrize("prior", [None, "normal"])
 def test_destvi_vamp_prior_from_normal_condscvi(prior):
