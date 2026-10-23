@@ -33,6 +33,7 @@ dependencies = [
   "lightning>=2",
   "numpy>=2",
   "pandas>=2",
+  "pooch",
   "pyro-ppl>=1.8",
   "rich>=12",
   "scanpy[skmisc]>=1.10",
