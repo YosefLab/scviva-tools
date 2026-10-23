@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a `TypeError` because the VampPrior from {meth}`scvi.model.CondSCVI.get_vamp_prior` was
     registered as numpy buffers. The VampPrior of {class}`scviva.module.MRDeconv` is now built from
     its buffers, so it follows the module to GPU and MPS devices.
+- `pooch` is now a core dependency. It is imported at module level by `scviva.tools.harreman`,
+    so `import scviva` failed with `ModuleNotFoundError` after a plain `pip install scviva-tools`.
 -
 ### Documentation
 
