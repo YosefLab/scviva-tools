@@ -28,7 +28,6 @@ classifiers = [
 ]
 dependencies = [
   "anndata>=0.11",
-  "igraph",
   "joblib",
   "lightning>=2",
   "numpy>=2",
@@ -75,6 +74,7 @@ optional-dependencies.spatial = [
 optional-dependencies.tpu = [ "torch-xla[tpu]" ]
 optional-dependencies.tutorials = [
   "cell2location",
+  "igraph",
   "jupyter",
   "leidenalg",
   "matplotlib",
