@@ -63,6 +63,7 @@ optional-dependencies.rapids-cuda13 = [
 ]
 optional-dependencies.spatial = [
   "geomloss",
+  "igraph",
   "numba",
   "pooch",
   "pynndescent",
@@ -79,6 +80,7 @@ optional-dependencies.tutorials = [
   "leidenalg",
   "matplotlib",
   "plotnine",
+  "pooch",
   "scrublet",
   "scviva-tools[spatial]",
   "seaborn",
