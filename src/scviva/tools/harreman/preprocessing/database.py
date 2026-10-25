@@ -4,8 +4,8 @@ from re import compile, match
 from typing import Literal
 
 import pandas as pd
-import pooch
 from anndata import AnnData
+from scvi.utils import dependencies
 
 from scviva.tools.harreman._data import harreman_data_hash, harreman_data_url
 
@@ -121,6 +121,7 @@ def build_transporter_matrix(index, metab_dict):
     return matrix.loc[:, matrix.any()]
 
 
+@dependencies("pooch")
 def extract_transporter_info(
     adata: AnnData,
     species: Literal["mouse", "human"],
@@ -140,6 +141,8 @@ def extract_transporter_info(
         operating in ``use_raw`` mode, so genes present only in
         ``adata.raw`` aren't silently dropped.
     """
+    import pooch
+
     if var_names is None:
         var_names = adata.var_names
     cache = pooch.os_cache("scvi_harreman")
@@ -215,6 +218,7 @@ def build_metabolite_df(metab_dict, key):
     return df
 
 
+@dependencies("pooch")
 def extract_lr_pairs(adata, species, var_names=None):
     """Extracting LR pairs from CellChatDB.
 
@@ -226,6 +230,8 @@ def extract_lr_pairs(adata, species, var_names=None):
         operating in ``use_raw`` mode, so genes present only in
         ``adata.raw`` aren't silently dropped.
     """
+    import pooch
+
     if var_names is None:
         var_names = adata.var_names
     cache = pooch.os_cache("scvi_harreman")

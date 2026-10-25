@@ -3,11 +3,11 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-import pooch
 import torch
 from anndata import AnnData
 from numba import njit
 from scipy.stats import norm
+from scvi.utils import dependencies
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
@@ -21,6 +21,7 @@ from . import models
 METABOLIC_GENES_DIR = "metabolic_genes"
 
 
+@dependencies("pooch")
 def load_metabolic_genes(
     species: Literal["mouse"] | Literal["human"] | None = None,
 ):
@@ -36,6 +37,8 @@ def load_metabolic_genes(
     -------
     List of metabolic genes.
     """
+    import pooch
+
     fname = f"{species}_metabolic_genes.csv"
     metabolic_genes_path = pooch.retrieve(
         url=harreman_data_url(METABOLIC_GENES_DIR, fname),

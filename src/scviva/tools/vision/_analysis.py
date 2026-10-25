@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+from scvi.utils import dependencies
 
 from scviva.tools._accessor import adata_delegate
 from scviva.tools.vision._constants import (
@@ -357,6 +358,7 @@ class VisionAnalysis:
         self._completed_steps.add(STEP_SETUP)
         logger.info("VisionAnalysis: setup complete.")
 
+    @dependencies("igraph")
     def _cluster_cells(
         self,
         obsm_key: str | None = None,
