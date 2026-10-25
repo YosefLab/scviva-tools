@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -
 ### Documentation
 
+- Expanded the installation page following the scvi-tools one: a "Prerequisites" section on
+  creating a virtual environment with `conda` (Miniforge/Mamba) or `venv` (uv), GPU/PyTorch
+  notes, the full list of optional extras (`cuda`, `metal`, `tpu`, `hub`, `vision`,
+  `rapids-cuda12`, ...), Google Colab and Docker sections.
+- Google Colab support for the tutorials: notebook pages now have an "Open in Colab" launch
+  button (`launch_buttons` in `docs/conf.py`), and every tutorial starts with the same install
+  cell that, only inside Colab, runs the [scvi-colab](https://github.com/scverse/scvi-colab)
+  helper and installs `scviva-tools[tutorials]` plus the tutorial-specific packages. This
+  replaces the previous per-notebook install cells, which either did not install scviva-tools
+  (DiagVI) or installed packages outside of Colab as well.
+- Tutorials no longer require `rapids_singlecell`. Each tutorial that uses it has a dedicated
+  cell that sets `HAS_RSC` when `rapids_singlecell` is importable and a GPU is usable (so a CPU
+  runtime on Google Colab is handled), and the neighbors/UMAP steps fall back to scanpy
+  otherwise. Unused `import rapids_singlecell as rsc` lines were removed (cell2location,
+  Stereoscope, Tangram, Harreman).
 - New "Analysis accessors" section in the User API listing the accessor classes.
 - Added an autosummary class template (`docs/_templates/autosummary/class.rst`) so class
   pages render full documentation for every method and attribute, not only a table of

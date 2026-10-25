@@ -120,6 +120,9 @@ html_theme_options = {
     "use_issues_button": True,
     "use_edit_page_button": True,
     "navbar_persistent": [],
+    # Adds an "Open in Colab" launch button to every notebook page. The tutorials live in
+    # this repo (docs/tutorials), so the default URL built by sphinx-book-theme is correct.
+    "launch_buttons": {"colab_url": "https://colab.research.google.com"},
     "repository_branch": "main",
     "path_to_docs": "docs",
 }
