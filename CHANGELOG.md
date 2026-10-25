@@ -25,7 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a `TypeError` because the VampPrior from {meth}`scvi.model.CondSCVI.get_vamp_prior` was
     registered as numpy buffers. The VampPrior of {class}`scviva.module.MRDeconv` is now built from
     its buffers, so it follows the module to GPU and MPS devices.
--
+- `pooch` and `igraph` are now imported lazily and guarded with the
+  {func}`scvi.utils.dependencies` decorator, so `import scviva` no longer requires them.
+  `pooch` is needed only by the Harreman dataset/database loaders
+  (`load_visium_mouse_colon_dataset`, `load_slide_seq_human_lung_dataset`,
+  `load_metabolic_genes`, `extract_transporter_info`, `extract_lr_pairs`) and `igraph` only
+  by VISION clustering (`VisionAnalysis._cluster_cells`); calling them without the package
+  installed raises a clear `ModuleNotFoundError` naming it. `igraph` moved from the core
+  dependencies to the `tutorials` extra (`pooch` is already in the `spatial` extra).
+
 ### Documentation
 
 - New "Analysis accessors" section in the User API listing the accessor classes.

@@ -1,11 +1,12 @@
 import anndata
-import pooch
+from scvi.utils import dependencies
 
 from scviva.tools.harreman._data import harreman_data_hash, harreman_data_url
 
 DATASETS_DIR = "datasets"
 
 
+@dependencies("pooch")
 def load_visium_mouse_colon_dataset(
     sample: str | None = None,
     save_path: str = "data/",
@@ -25,6 +26,8 @@ def load_visium_mouse_colon_dataset(
     adata : AnnData
         The loaded 10x Visium dataset.
     """
+    import pooch
+
     dataset_prefix = "Parigi_et_al_mouse_colon"
 
     samples_info = {
@@ -50,6 +53,7 @@ def load_visium_mouse_colon_dataset(
     return anndata.read_h5ad(path)
 
 
+@dependencies("pooch")
 def load_slide_seq_human_lung_dataset(
     sample: str | None = None,
     save_path: str = "data/",
@@ -71,6 +75,8 @@ def load_slide_seq_human_lung_dataset(
     adata : AnnData
         The loaded Slide-seq dataset.
     """
+    import pooch
+
     dataset_prefix = "Liu_et_al_human_lung"
 
     samples_info = {
