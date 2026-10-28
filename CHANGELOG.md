@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-28
+
 ### Changed
 
 - **Harreman and VISION accessor methods now expose their real arguments.** The
@@ -21,10 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HarremanToolsAccessor`, `HarremanPlottingAccessor`, and
   `scviva.tools.vision.VisionToolsAccessor`.
 - Fix {meth}`scviva.model.DestVI.from_rna_model` with a {class}`scvi.model.CondSCVI` trained with
-    the default `prior="normal"`: it raised a `KeyError` when `prior` was not passed explicitly and
-    a `TypeError` because the VampPrior from {meth}`scvi.model.CondSCVI.get_vamp_prior` was
-    registered as numpy buffers. The VampPrior of {class}`scviva.module.MRDeconv` is now built from
-    its buffers, so it follows the module to GPU and MPS devices.
+  the default `prior="normal"`: it raised a `KeyError` when `prior` was not passed explicitly and
+  a `TypeError` because the VampPrior from {meth}`scvi.model.CondSCVI.get_vamp_prior` was
+  registered as numpy buffers. The VampPrior of {class}`scviva.module.MRDeconv` is now built from
+  its buffers, so it follows the module to GPU and MPS devices.
 - `pooch` and `igraph` are now imported lazily and guarded with the
   {func}`scvi.utils.dependencies` decorator, so `import scviva` no longer requires them.
   `pooch` is needed only by the Harreman dataset/database loaders
