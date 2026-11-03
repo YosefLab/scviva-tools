@@ -79,6 +79,10 @@ warnings.filterwarnings(
 # PyroBaseModuleClass is imported from pyro instead of scvi.module.base, and
 # AnnDataLoader is left unresolved as a result. These warnings are emitted while
 # autodoc documents ResolVI's inherited sample_posterior method.
+# VAEMixin.get_aggregated_posterior is also annotated ``-> torch.dist.Distribution``
+# (``torch.dist`` is a function), which newer sphinx-autodoc-typehints cannot resolve
+# for the models that inherit it (SCVIVA, DIAGVI). Fixed upstream in scverse/scvi-tools#4091;
+# drop that entry once a scvi-tools release with the fix is required.
 
 
 class _ScviPyroTypeHintFilter(logging.Filter):
@@ -90,11 +94,23 @@ class _ScviPyroTypeHintFilter(logging.Filter):
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return not record.getMessage().startswith(self._messages)
+        message = record.getMessage()
+        if message.startswith(self._messages):
+            return False
+        return not (
+            '.get_aggregated_posterior" (module scvi.model.base._vaemixin)' in message
+            and "'builtin_function_or_method' object has no attribute 'Distribution'" in message
+        )
 
 
 _scvi_pyro_type_hint_filter = _ScviPyroTypeHintFilter()
-logging.getLogger("sphinx.sphinx_autodoc_typehints").addFilter(_scvi_pyro_type_hint_filter)
+# Logger filters do not apply to records of child loggers, and newer sphinx-autodoc-typehints
+# emits its categorized warnings from the `_warnings` submodule's logger.
+for _logger_name in (
+    "sphinx.sphinx_autodoc_typehints",
+    "sphinx.sphinx_autodoc_typehints._warnings",
+):
+    logging.getLogger(_logger_name).addFilter(_scvi_pyro_type_hint_filter)
 
 # -- HTML output -------------------------------------------------------------
 
