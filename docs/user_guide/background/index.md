@@ -1,6 +1,6 @@
 # Background
 
-Conceptual guides explaining the statistical and algorithmic foundations of scVIVA-Tools models.
+Conceptual guides explaining the statistical and algorithmic foundations of scviva-tools models.
 
 ```{toctree}
 :maxdepth: 2

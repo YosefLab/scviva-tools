@@ -100,14 +100,15 @@ def compute_ct_cell_communication(
     -------
     None
         Results are stored in the following `adata.uns` fields:
-            - `ct_ccc_results["p"]`: parametric results per gene pair, metabolite, and cell type.
-            - `ct_ccc_results["np"]`: non-parametric scores, empirical p-values, and FDRs.
-            - `gene_pair_dict`: dictionary mapping metabolites to relevant gene pairs.
-            - `gene_pairs_ind`, `gene_pairs_ind_per_ct_pair`: index-referenced gene pair
-              representations.
-            - `D`: spatial node degree for each cell per cell type pair.
-            - `cells`, `genes`: ordered list of cells and genes used in analysis.
-            - (optional) `ct_ccc_results["np"]["analytic_null"]`: permutation null outputs.
+
+        - `ct_ccc_results["p"]`: parametric results per gene pair, metabolite, and cell type.
+        - `ct_ccc_results["np"]`: non-parametric scores, empirical p-values, and FDRs.
+        - `gene_pair_dict`: dictionary mapping metabolites to relevant gene pairs.
+        - `gene_pairs_ind`, `gene_pairs_ind_per_ct_pair`: index-referenced gene pair
+          representations.
+        - `D`: spatial node degree for each cell per cell type pair.
+        - `cells`, `genes`: ordered list of cells and genes used in analysis.
+        - (optional) `ct_ccc_results["np"]["analytic_null"]`: permutation null outputs.
     """
     start = time.time()
     device = resolve_device(device)

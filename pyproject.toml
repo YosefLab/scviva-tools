@@ -98,14 +98,10 @@ test = [ "coverage", "pytest>=7", "pytest-cov", "pytest-pretty" ]
 doc = [
   "ipykernel",
   "ipython",
-  "myst-nb",
-  "myst-parser",
   "pooch",
-  "sphinx<9",
+  "scverse-doc[full]>=0.4",
+  "sphinx>=9.1",
   "sphinx-autodoc-typehints",
-  "sphinx-book-theme>=1.0.1",
-  "sphinx-copybutton",
-  "sphinx-design",
   "sphinxcontrib-bibtex",
   "torch-geometric",
 ]

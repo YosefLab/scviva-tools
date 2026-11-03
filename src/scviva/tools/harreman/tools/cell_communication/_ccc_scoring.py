@@ -80,13 +80,14 @@ def compute_cell_communication(
     -------
     None
         Results are stored in the following `adata.uns` fields:
-            - `uns["ccc_results"]["p"]`: Parametric test results (scores, Z, p-values, FDR).
-            - `uns["ccc_results"]["np"]`: Non-parametric results (scores, p-values, FDR).
-            - `uns["lc_zs"]`: Symmetric matrix of ligand-receptor Z-scores across genes.
-            - `uns["gene_pair_dict"]`: Dictionary mapping metabolites to gene pair indices.
-            - `uns["D"]`: Vector of total node degrees per cell (spatial connectivity).
-            - `uns["genes"]`: Ordered list of involved genes.
-            - `uns["gene_pairs_ind"]`: Index-referenced version of `uns["gene_pairs"]`.
+
+        - `uns["ccc_results"]["p"]`: Parametric test results (scores, Z, p-values, FDR).
+        - `uns["ccc_results"]["np"]`: Non-parametric results (scores, p-values, FDR).
+        - `uns["lc_zs"]`: Symmetric matrix of ligand-receptor Z-scores across genes.
+        - `uns["gene_pair_dict"]`: Dictionary mapping metabolites to gene pair indices.
+        - `uns["D"]`: Vector of total node degrees per cell (spatial connectivity).
+        - `uns["genes"]`: Ordered list of involved genes.
+        - `uns["gene_pairs_ind"]`: Index-referenced version of `uns["gene_pairs"]`.
     """
     start = time.time()
     device = resolve_device(device)

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The documentation is built with `scverse-doc` on Sphinx 9 and uses its sidebar layout:
+  Getting started, Guides (tutorials, user guide, developer documentation, architecture, FAQ),
+  Reference (API, models) and Project, with a new citation page, following
+  [scvi-tools#4091](https://github.com/scverse/scvi-tools/pull/4091). The Colab launch button on
+  tutorial pages, the download and full screen buttons, and the tutorial filters are kept, and
+  `[source]` links now point to GitHub instead of highlighted copies of the code.
+
 ## [0.1.8] - 2026-10-28
 
 ### Changed

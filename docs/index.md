@@ -1,22 +1,48 @@
-# scVIVA-Tools
+# scviva-tools
 
-**scVIVA-Tools** is a consolidated spatial transcriptomics analysis toolkit built on top of [scvi-tools](https://scvi-tools.org), exposing ResolVI, DestVI, scVIVA, DiagVI, Harreman, gimVI, Stereoscope, and Tangram through a clean, unified API.
+**scviva-tools** is a consolidated spatial transcriptomics analysis toolkit built on top of [scvi-tools](https://scvi-tools.org), exposing ResolVI, DestVI, scVIVA, DiagVI, Harreman, gimVI, Stereoscope, and Tangram through a clean, unified API.
 
 ```{toctree}
+:caption: Getting started
+:hidden: true
 :maxdepth: 1
-:hidden:
 
 installation
-user_guide/index
+```
+
+```{toctree}
+:caption: Guides
+:hidden: true
+:maxdepth: 2
+:titlesonly: true
+
 tutorials/index
-api/index
+user_guide/index
 developer/index
 architecture/index
 faq
+```
+
+```{toctree}
+:caption: Reference
+:hidden: true
+:maxdepth: 2
+:titlesonly: true
+
+api/index
+user_guide/models/index
+```
+
+```{toctree}
+:caption: Project
+:hidden: true
+:maxdepth: 1
+
 changelog.md
+citation
 references
-Discussion <https://discourse.scvi-tools.org>
 GitHub <https://github.com/YosefLab/scviva-tools>
+Discourse <https://discourse.scverse.org/c/help/scvi-tools/7>
 Model hub <https://huggingface.co/scvi-tools>
 ```
 
