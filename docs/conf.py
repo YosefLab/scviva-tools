@@ -115,7 +115,6 @@ for _logger_name in (
 # -- HTML output -------------------------------------------------------------
 
 html_logo = "_static/logo.svg"
-html_title = "scVIVA-Tools"
 # sphinxext-opengraph (set up by scverse_doc) cannot use the SVG logo for social cards.
 ogp_social_cards = {"image": "_static/logo.png"}
 html_theme_options = {

@@ -204,7 +204,7 @@ impute the spatial pattern of the cell-type-specific gene expression with:
 
 ## New DestVI
 
-The version is scVIVA-Tools is an upgraded version of DestVI compared to what we had in scvi-tools.
+The version is scviva-tools is an upgraded version of DestVI compared to what we had in scvi-tools.
 
 Main Additions of new version:
 

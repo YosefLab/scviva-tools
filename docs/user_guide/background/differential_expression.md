@@ -2,7 +2,7 @@
 
 ## Overview
 
-scVIVA-Tools inherits scvi-tools' Bayes-factor differential expression framework and extends
+scviva-tools inherits scvi-tools' Bayes-factor differential expression framework and extends
 it with **niche-aware DE** (scVIVA) and **niche abundance DE** (ResolVI).
 
 ## Standard DE (vanilla / change mode)
@@ -39,4 +39,4 @@ patterns across disease states.
 
 ## References
 
-- Boyeau et al. (2019) *Deep generative models for detecting differential expression*. bioRxiv.
+- Boyeau et al. (2019) _Deep generative models for detecting differential expression_. bioRxiv.

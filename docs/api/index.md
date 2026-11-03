@@ -1,6 +1,6 @@
 # API Reference
 
-Import scVIVA-Tools as:
+Import scviva-tools as:
 
 ```python
 import scviva
