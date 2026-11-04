@@ -120,6 +120,8 @@ ogp_social_cards = {"image": "_static/logo.png"}
 html_theme_options = {
     # scviva-tools is not in the scverse registry, so use scvi-tools' yellow accent.
     "accent": "oklch(0.824 0.1634 81)",
+    # Dark-mode logo recolours the navy wordmark light grey; the icon is unchanged.
+    "logo": {"image_light": "_static/logo.svg", "image_dark": "_static/logo-dark.svg"},
     # The scverse theme's header, plus the Colab/download/fullscreen buttons that
     # sphinx-book-theme used to provide (see extensions/header_buttons.py).
     "article_header_end": [
