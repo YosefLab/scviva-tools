@@ -241,9 +241,10 @@ def run_cell_communication_analysis(
             how="left",
         )
         LR_df = df_merged.dropna(subset=["pathway_name"])
-        metabolite_gene_pair_df["metabolite"][
-            metabolite_gene_pair_df.metabolite.isin(LR_df.metabolite)
-        ] = LR_df["pathway_name"]
+        # .loc, not chained `df["metabolite"][mask] = ...`, which is a silent no-op under
+        # pandas 3 copy-on-write. Right-hand side aligns on the shared RangeIndex.
+        lr_mask = metabolite_gene_pair_df["metabolite"].isin(LR_df["metabolite"])
+        metabolite_gene_pair_df.loc[lr_mask, "metabolite"] = LR_df["pathway_name"]
 
     gene_pair_dict = {}
     for metabolite, group in metabolite_gene_pair_df.groupby("metabolite"):
@@ -732,9 +733,10 @@ def compute_interacting_cell_scores(
             how="left",
         )
         LR_df = df_merged.dropna(subset=["pathway_name"])
-        metabolite_gene_pair_df["metabolite"][
-            metabolite_gene_pair_df.metabolite.isin(LR_df.metabolite)
-        ] = LR_df["pathway_name"]
+        # .loc, not chained `df["metabolite"][mask] = ...`, which is a silent no-op under
+        # pandas 3 copy-on-write. Right-hand side aligns on the shared RangeIndex.
+        lr_mask = metabolite_gene_pair_df["metabolite"].isin(LR_df["metabolite"])
+        metabolite_gene_pair_df.loc[lr_mask, "metabolite"] = LR_df["pathway_name"]
 
     if restrict_significance in ["both", "gene pairs"]:
         cell_com_gp_df = adata.uns["ccc_results"]["cell_com_df_gp_sig"].copy()

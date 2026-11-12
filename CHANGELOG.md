@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tutorial pages, the download and full screen buttons, and the tutorial filters are kept, and
   `[source]` links now point to GitHub instead of highlighted copies of the code.
 
+### Fixed
+
+- {meth}`scviva.tl.HarremanAnalysis.setup` is several hundred times faster under pandas 3:
+  about 4 s instead of 20–45 min on a 2,600-spot Visium section with 31k genes. Under pandas 3,
+  `AnnData.var_names` is backed by Arrow strings, and the interaction-database builders
+  (`extract_lr_pairs`, `build_LR_matrix` and `extract_transporter_info` in
+  `scviva.tools.harreman.preprocessing.database`) called `Series.isin` against it once per
+  interaction, which re-converts the whole gene index on every call. Gene membership is now
+  checked against a set. The resulting tables are unchanged.
+- Ligand-receptor interactions are grouped under their CellChat `pathway_name` again in
+  {meth}`scviva.tl.HarremanAnalysis.compute_cell_communication`, in both `"standard"` and
+  `"cell_type"` mode. The relabeling used a chained assignment, which pandas 3 copy-on-write
+  turns into a silent no-op, so metabolite-level results and `adata.uns["gene_pair_dict"]` were
+  keyed by individual interaction names (e.g. `CCL19_CCR7`) instead of pathways.
+
 ## [0.1.8] - 2026-10-28
 
 ### Changed
