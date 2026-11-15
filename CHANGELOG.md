@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `import scviva` now loads the `data`, `external`, `model`, `module`, `train` and `utils`
+  subpackages, as `import scvi` does, so `scviva.model.ResolVI`, `scviva.external.Tangram`
+  and similar paths work without a separate import. Before, they raised
+  `AttributeError: module 'scviva' has no attribute 'model'` unless the submodule had already
+  been imported elsewhere, for example by `from scviva.model._resolvi import ResolVI`.
 - {meth}`scviva.tl.HarremanAnalysis.setup` is several hundred times faster under pandas 3:
   about 4 s instead of 20–45 min on a 2,600-spot Visium section with 31k genes. Under pandas 3,
   `AnnData.var_names` is backed by Arrow strings, and the interaction-database builders
