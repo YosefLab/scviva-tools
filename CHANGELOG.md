@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `pip install "scviva-tools[all]"` works on macOS and Windows again. The RAPIDS packages in the
+  `rapids`, `rapids-cuda12` and `rapids-cuda13` extras (cuML, cuGraph, cuPy, rapids-singlecell)
+  are now installed only on Linux, the only platform RAPIDS supports. Before, `[all]` pulled in
+  `cupy`, whose source build fails on macOS with `Error: macOS is no longer supported`.
 - `import scviva` now loads the `data`, `external`, `model`, `module`, `train` and `utils`
   subpackages, as `import scvi` does, so `scviva.model.ResolVI`, `scviva.external.Tangram`
   and similar paths work without a separate import. Before, they raised
