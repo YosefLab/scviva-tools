@@ -28,6 +28,8 @@ pip install "scviva-tools[all]"        # everything above
 
 See [docs/installation.md](docs/installation.md) for details, including a development install.
 
+To give your coding agent guidance on scviva-tools, install the bundled skill with `scviva-tools-install-skills --agent {claude,codex,agents,claude-science}` (or `--dest <dir>`).
+
 ## Quick Start
 
 ```python
