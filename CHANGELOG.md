@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ResolVI.setup_anndata(..., prepare_data=True)` now stores each cell's true k nearest spatial
+  neighbors in `obsm["index_neighbor"]`, with squared Euclidean distances in
+  `obsm["distance_neighbor"]`. Before, the scanpy distance graph was squared with `**`, which on
+  a sparse matrix is the matrix power, so cells got neighbors of neighbors (almost no overlap
+  with the true spatial kNN). resolVI models trained with `prepare_data=True` should be
+  retrained. Reported by Giacomo Cinnirella.
 - `pip install "scviva-tools[all]"` works on macOS and Windows again. The RAPIDS packages in the
   `rapids`, `rapids-cuda12` and `rapids-cuda13` extras (cuML, cuGraph, cuPy, rapids-singlecell)
   are now installed only on Linux, the only platform RAPIDS supports. Before, `[all]` pulled in
