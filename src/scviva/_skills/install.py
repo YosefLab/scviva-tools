@@ -69,7 +69,9 @@ def _claude_science_skills_dir() -> Path:
         or Path(org_uuid).name != org_uuid
         or org_uuid in {".", ".."}
     ):
-        raise ValueError(f"invalid Claude Science org_uuid in {active_org_path}; pass --dest instead")
+        raise ValueError(
+            f"invalid Claude Science org_uuid in {active_org_path}; pass --dest instead"
+        )
     return root / "orgs" / org_uuid / "skills"
 
 
@@ -90,7 +92,9 @@ def resolve_dest(agent: str | None, dest: Path | None) -> Path:
     if dest is not None:
         return dest.expanduser()
     if agent is None:
-        raise ValueError("pass --agent {" + ",".join(AGENTS) + "} or --dest to choose where to install")
+        raise ValueError(
+            "pass --agent {" + ",".join(AGENTS) + "} or --dest to choose where to install"
+        )
     return _skills_dir(agent) / SKILL_NAME
 
 
@@ -165,7 +169,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{SKILL_NAME} skill already up to date at {dest}")
                 return 0
             if not args.force:
-                print(f"{dest} already exists and differs; pass --force to overwrite", file=sys.stderr)
+                print(
+                    f"{dest} already exists and differs; pass --force to overwrite",
+                    file=sys.stderr,
+                )
                 return 1
             if dest.is_dir():
                 shutil.rmtree(dest)
