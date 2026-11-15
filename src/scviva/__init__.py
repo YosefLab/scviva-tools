@@ -6,6 +6,10 @@ from importlib.metadata import version as _version
 
 from scviva._settings import settings
 
+# Eagerly import subpackages (as scvi-tools does) so `import scviva` alone makes
+# `scviva.model.ResolVI`, `scviva.external.Tangram`, etc. resolvable as attributes.
+# This import needs to come after `settings` to prevent circular imports.
+from . import data, external, model, module, train, utils
 from . import plotting as pl
 from . import tools as tl
 
@@ -34,4 +38,19 @@ def __getattr__(name: str):
     raise AttributeError(f"module 'scviva' has no attribute {name!r}")
 
 
-__all__ = ["SCVIVA", "DestVI", "ResolVI", "GIMVI", "__version__", "pl", "settings", "tl"]
+__all__ = [
+    "SCVIVA",
+    "DestVI",
+    "ResolVI",
+    "GIMVI",
+    "__version__",
+    "data",
+    "external",
+    "model",
+    "module",
+    "pl",
+    "settings",
+    "tl",
+    "train",
+    "utils",
+]
