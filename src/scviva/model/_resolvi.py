@@ -750,8 +750,7 @@ class ResolVI(
             # Square element-wise (``**`` on a sparse matrix is the matrix power D @ D),
             # then sort each row by distance: ``_kneighbors_from_graph`` keeps the first
             # ``n_neighbors`` stored entries per row.
-            distances = sub_data.obsp["distances"].copy()
-            distances.data **= 2
+            distances = sub_data.obsp["distances"].power(2)
             distances = sort_graph_by_row_values(distances, warn_when_not_sorted=False)
 
             distance_neighbor[index, :], index_neighbor_batch = _kneighbors_from_graph(
