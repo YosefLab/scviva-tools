@@ -117,3 +117,67 @@ def test_resolvi_normalized_expression_gene_list():
     # can still call it.
     with pytest.warns(UserWarning, match="transform_batch.*ignored"):
         model.get_normalized_expression_importance(n_samples=30, transform_batch=0)
+
+
+@pytest.mark.parametrize("batch_key", [None, "batch"])
+def test_resolvi_prepare_data_matches_spatial_knn(batch_key):
+    """prepare_data stores the true k nearest spatial neighbors with squared distances.
+
+    Regression test: the scanpy distance graph used to be squared with ``**``, which on a
+    sparse matrix is the matrix power (neighbors of neighbors), not element-wise.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    k = 10
+    adata = synthetic_iid()
+    coords = np.random.default_rng(0).random((adata.n_obs, 2))
+    adata.obsm["X_spatial"] = coords.copy()
+    ResolVI.setup_anndata(
+        adata, batch_key=batch_key, prepare_data=True, prepare_data_kwargs={"n_neighbors": k}
+    )
+    np.testing.assert_array_equal(adata.obsm["X_spatial"], coords)
+
+    if batch_key is None:
+        groups = [np.arange(adata.n_obs)]
+    else:
+        groups = [np.where(adata.obs[batch_key] == b)[0] for b in adata.obs[batch_key].unique()]
+    for idx in groups:
+        ind = adata.obsm["index_neighbor"][idx]
+        dist = adata.obsm["distance_neighbor"][idx]
+        assert np.isin(ind, idx).all()  # neighbors stay within the batch
+        assert (ind != idx[:, None]).all()  # no self-neighbors
+
+        true_sq = ((coords[ind] - coords[idx][:, None, :]) ** 2).sum(-1)
+        np.testing.assert_allclose(dist, true_sq, rtol=1e-4, atol=1e-7)
+
+        # tie-robust kNN check: every stored neighbor is within the true k-th distance
+        knn_dist, _ = NearestNeighbors(n_neighbors=k + 1).fit(coords[idx]).kneighbors()
+        kth_sq = knn_dist[:, k - 1] ** 2
+        assert (true_sq <= kth_sq[:, None] * (1 + 1e-6)).all()
+
+
+def test_resolvi_prepare_data_recomputes_legacy_cache():
+    """Neighbors cached by a release without the corrected graph are recomputed.
+
+    Older releases stored the same ``_resolvi_prepare_data_config`` (without a version
+    marker), so setup_anndata used to trust their wrong neighbors and skip recomputation.
+    """
+    k = 10
+    adata = synthetic_iid()
+    adata.obsm["X_spatial"] = np.random.default_rng(0).random((adata.n_obs, 2))
+    ResolVI.setup_anndata(adata, prepare_data=True, prepare_data_kwargs={"n_neighbors": k})
+    expected_index = adata.obsm["index_neighbor"].copy()
+    expected_distance = adata.obsm["distance_neighbor"].copy()
+
+    # current cache is reused: valid-looking arrays with the current config are not touched
+    adata.obsm["index_neighbor"] = np.zeros_like(expected_index)
+    ResolVI.setup_anndata(adata, prepare_data=True, prepare_data_kwargs={"n_neighbors": k})
+    assert (adata.obsm["index_neighbor"] == 0).all()
+
+    # legacy cache (config as written by older releases) is recomputed
+    adata.uns["_resolvi_prepare_data_config"] = {"batch_key": None, "n_neighbors": k}
+    adata.obsm["distance_neighbor"] = np.ones_like(expected_distance)
+    ResolVI.setup_anndata(adata, prepare_data=True, prepare_data_kwargs={"n_neighbors": k})
+    np.testing.assert_array_equal(adata.obsm["index_neighbor"], expected_index)
+    np.testing.assert_allclose(adata.obsm["distance_neighbor"], expected_distance)
+    assert adata.uns["_resolvi_prepare_data_config"]["neighbor_algorithm_version"] == 2
