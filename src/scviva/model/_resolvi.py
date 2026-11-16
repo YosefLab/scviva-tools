@@ -41,6 +41,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Bump when ``_prepare_data`` changes the neighbors it computes, so that neighbors cached in
+# ``adata.uns["_resolvi_prepare_data_config"]`` by an older version are recomputed.
+_PREPARE_DATA_VERSION = 2
+
 
 class ResolVI(
     SpatialNeighborhoodMixin,
@@ -806,7 +810,12 @@ class ResolVI(
             if prepare_data_kwargs is None:
                 prepare_data_kwargs = {}
             spatial_rep = prepare_data_kwargs.get("spatial_rep", "X_spatial")
-            effective_config = {"batch_key": batch_key, **prepare_data_kwargs}
+            # The version marker invalidates neighbors cached by older releases.
+            effective_config = {
+                "batch_key": batch_key,
+                **prepare_data_kwargs,
+                "neighbor_algorithm_version": _PREPARE_DATA_VERSION,
+            }
             stored_config = adata.uns.get("_resolvi_prepare_data_config", None)
             neighbors_valid = (
                 stored_config == effective_config
