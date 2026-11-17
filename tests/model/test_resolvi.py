@@ -125,8 +125,19 @@ def test_resolvi_prepare_data_matches_spatial_knn(batch_key):
 
     Regression test: the scanpy distance graph used to be squared with ``**``, which on a
     sparse matrix is the matrix power (neighbors of neighbors), not element-wise.
+
+    ``_prepare_data`` uses rapids_singlecell when it can be imported. Its graph lists each
+    cell as its own first neighbor (distance 0) and has float32 distances, while scanpy's
+    graph has no self-edges. The checks below follow whichever backend ran.
     """
     from sklearn.neighbors import NearestNeighbors
+
+    try:
+        import rapids_singlecell  # noqa: F401
+
+        use_rapids = True
+    except ImportError:
+        use_rapids = False
 
     k = 10
     adata = synthetic_iid()
@@ -145,15 +156,23 @@ def test_resolvi_prepare_data_matches_spatial_knn(batch_key):
         ind = adata.obsm["index_neighbor"][idx]
         dist = adata.obsm["distance_neighbor"][idx]
         assert np.isin(ind, idx).all()  # neighbors stay within the batch
-        assert (ind != idx[:, None]).all()  # no self-neighbors
+        if use_rapids:
+            # rapids: first neighbor is the cell itself at distance 0, then k - 1 others
+            np.testing.assert_array_equal(ind[:, 0], idx)
+            np.testing.assert_array_equal(dist[:, 0], 0)
+            ind, dist = ind[:, 1:], dist[:, 1:]
+            n_true, atol = k - 1, 1e-6  # float32 distances
+        else:
+            n_true, atol = k, 1e-7
+        assert (ind != idx[:, None]).all()  # no other self-neighbors
 
         true_sq = ((coords[ind] - coords[idx][:, None, :]) ** 2).sum(-1)
-        np.testing.assert_allclose(dist, true_sq, rtol=1e-4, atol=1e-7)
+        np.testing.assert_allclose(dist, true_sq, rtol=1e-4, atol=atol)
 
-        # tie-robust kNN check: every stored neighbor is within the true k-th distance
+        # tie-robust kNN check: every stored neighbor is within the true n_true-th distance
         knn_dist, _ = NearestNeighbors(n_neighbors=k + 1).fit(coords[idx]).kneighbors()
-        kth_sq = knn_dist[:, k - 1] ** 2
-        assert (true_sq <= kth_sq[:, None] * (1 + 1e-6)).all()
+        kth_sq = knn_dist[:, n_true - 1] ** 2
+        assert (true_sq <= kth_sq[:, None] * (1 + 1e-6) + atol).all()
 
 
 def test_resolvi_prepare_data_recomputes_legacy_cache():
