@@ -1,48 +1,60 @@
 ---
 
 name: scviva
-description: "Use when analyzing spatial transcriptomics with the scviva-tools package (import scviva): niche-aware embeddings and niche differential expression (SCVIVA), spot deconvolution into cell-type proportions (DestVI, Stereoscope, Tangram), denoising/relabeling cellular-resolution data (ResolVI), imputing unmeasured genes or integrating modalities (GIMVI, DIAGVI), and spatial cell-cell or metabolic communication and gene-signature scoring (Harreman, VISION)."
+description: "Use when analysing spatial transcriptomics with the scviva-tools package (import scviva): cell-type deconvolution of spots from a scRNA-seq reference (DestVI, Stereoscope, Tangram), niche-aware embeddings and niche differential expression (scVIVA), denoising or relabelling cells and DE (ResolVI), gene imputation (GIMVI), or spatial cell-cell and metabolic communication (Harreman)."
 ---
 
 # scviva-tools (`import scviva`)
 
-Spatial extensions of scvi-tools. The models use the usual scvi pattern
-(`Model.setup_anndata(adata, ...)` → `Model(adata)` → `.train()` → getters). Harreman and VISION
-are stateful analysis objects whose steps must run in order.
+Spatial models built on scvi-tools. `scvi-tools` is installed too, and some classes exist
+in both packages. **Use the `scviva` versions.** The `scvi.*` copy of DestVI does not work
+with the installed versions (details below).
 
-## Pick the entry point from the goal
+## Running work: the run is graded when your turn ends
 
-| Goal                                                                                                                                   | Entry point                                                                                                 | Details                         |
-| -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| Niche-aware latent space, predict neighborhood composition, DE between cell groups that discounts contamination from spatial neighbors | `scviva.model.SCVIVA`                                                                                       | `references/scviva.md`          |
-| Cell-type proportions per spot (Visium-like) from an scRNA reference                                                                   | `scviva.model.DestVI` (+ `scvi.model.CondSCVI`), or `scviva.external.RNAStereoscope` + `SpatialStereoscope` | `references/deconvolution.md`   |
-| Map single cells onto spots, project labels or genes into space                                                                        | `scviva.external.Tangram` (MuData input)                                                                    | `references/deconvolution.md`   |
-| Denoise cellular-resolution ST, (re)annotate cells semi-supervised, DE after correction                                                | `scviva.model.ResolVI`                                                                                      | `references/resolvi.md`         |
-| Impute genes missing from a spatial panel using scRNA-seq                                                                              | `scviva.model.GIMVI`                                                                                        | `references/integration.md`     |
-| Integrate unpaired modalities (e.g. RNA + spatial proteomics), cross-modal imputation or label transfer                                | `scviva.external.DIAGVI`                                                                                    | `references/integration.md`     |
-| Ligand-receptor or metabolite exchange between neighboring cells or spots, spatially autocorrelated genes                              | `scviva.tools.HarremanAnalysis`                                                                             | `references/harreman_vision.md` |
-| Score gene signatures per cell and test their autocorrelation on a cell graph                                                          | `scviva.tools.VisionAnalysis`                                                                               | `references/harreman_vision.md` |
+- Training takes minutes. Run each script in the **foreground** with a long Bash timeout
+  (`timeout=600000`). Always pass an explicit `max_epochs`. `scviva.DestVI.train` defaults
+  to 2000 epochs.
+- If a job may run past one call, split it into steps. Save each trained model with
+  `model.save(dir, overwrite=True)` and load it in the next step with
+  `Cls.load(dir, adata=adata)`.
+- Write the result file (e.g. `answer.md`) from inside the script as soon as the result exists.
+  **Never end your turn while a job is still running in the background.** Wait for it to
+  finish and check the output file before you stop.
+- A CUDA GPU is usually available, so keep `accelerator="auto"`. Do not force CPU unless you
+  have to. CPU training is much slower and is the usual reason a run times out.
 
-Imports that work: `from scviva.model import SCVIVA, DestVI, ResolVI, GIMVI`,
-`from scviva.external import Tangram, RNAStereoscope, SpatialStereoscope, DIAGVI`,
-`from scviva.tools import HarremanAnalysis, VisionAnalysis`. GIMVI lives in `scviva.model`,
-not `scviva.external`.
+## Pick the entry point by goal
 
-## Rules that apply to every model
+| Goal                                                                           | Entry point                                                                                                        | Recipe                     |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| Cell-type proportions per spot from a scRNA reference                          | `scvi.model.CondSCVI` then `scviva.DestVI.from_rna_model`                                                          | references/destvi.md       |
+| Niche-aware latent space, or DE between groups that accounts for neighbourhood | `scviva.SCVIVA`                                                                                                    | references/scviva_niche.md |
+| Correct or reassign cell labels, denoise, DE on cellular-resolution data       | `scviva.ResolVI` (same as `scviva.model.ResolVI`)                                                                  | references/resolvi.md      |
+| Ligand-receptor or metabolite-transport communication                          | `scviva.tools.harreman.HarremanAnalysis`                                                                           | references/harreman.md     |
+| Other deconvolution or mapping methods, or imputation                          | `scviva.external.RNAStereoscope` + `scviva.external.SpatialStereoscope`, `scviva.external.Tangram`, `scviva.GIMVI` | see the class docstrings   |
 
-- Train on raw counts. If `adata.X` is normalized or log-transformed, pass `layer="counts"`
-  (whichever layer holds integers) to `setup_anndata`.
-- Seed with `scviva.settings.seed = 0` before building models.
-- Every key you name must exist, and several setup defaults point at keys your data probably
-  lacks: SCVIVA defaults to `labels_key="cell_type"`, `expression_embedding_key="X_scVI"`,
-  `cell_coordinates_key="spatial"`; ResolVI looks for coordinates in `obsm["X_spatial"]`.
-  Inspect `adata.obs.columns` and `adata.obsm.keys()` first and pass the real names.
-- If the task states hyperparameters (epochs, k, delta, FDR target, lr, batch size, test
-  type), pass them exactly; they change the answer. Otherwise keep the defaults. On CPU the
-  defaults can be slow (DestVI trains 2000 epochs); lower `max_epochs` only if the task allows.
-- scvi-style `differential_expression` tables are sorted by `proba_de`, not by effect size.
-  For "most up-regulated gene in group1", sort by `lfc_mean` descending (optionally restricted
-  to rows where `is_de_fdr_<fdr_target>` is True). Positive `lfc_mean` means higher in `group1`.
-  `group1` accepts a string or list; `group2=None` compares against all other cells.
-- Getters return pandas objects indexed by `obs_names` and `var_names` (e.g. proportions are
-  spots × cell types). Align with `adata.obs` by index before grouping.
+## Traps that cost runs
+
+- **DestVI:** use `scviva.DestVI`, **not** `scvi.model.DestVI`. The scvi copy raises
+  `KeyError: 'prior'`. With patches it then raises "cannot assign numpy.ndarray to buffer
+  mean_vprior", and after that a cuda/cpu device mismatch. Agents lost whole runs patching
+  around these errors. `scviva.DestVI.from_rna_model(st_adata, condscvi_model)` works unpatched
+  with both CondSCVI priors (default `"normal"` and `"mog"`), on GPU.
+- `from_rna_model` registers the spatial AnnData itself, copying the CondSCVI setup
+  arguments. If CondSCVI used a `batch_key`, that `obs` column must also exist in the spatial
+  AnnData, or you get `KeyError: '<col> not found in adata.obs'`. Subset both AnnData objects
+  to the same genes before training CondSCVI.
+- **SCVIVA:** call `SCVIVA.preprocessing_anndata(...)` **before** `setup_anndata`, with the same
+  keys. It needs an expression embedding already in `obsm` (e.g. `X_scVI` or `X_scANVI`).
+  `differential_expression` returns a **dataclass**, not a DataFrame. The main table is
+  `res.g1_g2`.
+- **ResolVI:** `setup_anndata` builds spatial neighbours from `obsm["X_spatial"]` by default.
+  If the coordinates are stored under another key, pass
+  `prepare_data_kwargs={"spatial_rep": "<key>"}`. `predict(soft=False)` returns a numpy
+  array of label strings.
+- **Harreman:** use `compute_gene_pairs(ct_specific=False)` for the standard (not
+  cell-type-aware) analysis. Use the same `test=` in `compute_cell_communication` and
+  `select_significant_interactions`. Drop cells with NaN coordinates first.
+- When a task specifies a parameter (epochs, delta, FDR, k, test mode, prior…), pass it
+  explicitly. The defaults here often differ from scvi-tools. When it does not, use the defaults.
