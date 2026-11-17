@@ -8,7 +8,8 @@ verbatim — no per-framework conversion.
 Frameworks (``--agent``):
 
 - ``claude``          -> ``~/.claude/skills`` (honours ``CLAUDE_CONFIG_DIR``)
-- ``codex``           -> ``~/.agents/skills`` (where Codex discovers user skills; same as ``agents``)
+- ``codex``           -> ``~/.agents/skills`` (where Codex discovers user skills;
+  same as ``agents``)
 - ``agents``          -> ``~/.agents/skills``
 - ``claude-science``  -> the active org's skills dir, resolved from
   ``~/.claude-science/active-org.json``
@@ -115,7 +116,10 @@ def _matches(source: Path, target: Path) -> bool:
 def main(argv: list[str] | None = None) -> int:
     """Install the bundled skill; entry point for the ``<dist>-install-skills`` script."""
     parser = argparse.ArgumentParser(
-        description=f"Install the {SKILL_NAME} skill bundled with this package into an agent's skills directory.",
+        description=(
+            f"Install the {SKILL_NAME} skill bundled with this package "
+            "into an agent's skills directory."
+        ),
     )
     parser.add_argument(
         "--agent",
