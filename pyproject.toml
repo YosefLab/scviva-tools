@@ -96,6 +96,7 @@ optional-dependencies.vision = [ "biopython>=1.79" ]
 urls."Bug Tracker" = "https://github.com/YosefLab/scviva-tools/issues"
 urls.Documentation = "https://github.com/YosefLab/scviva-tools"
 urls.Source = "https://github.com/YosefLab/scviva-tools"
+scripts.scviva-tools-install-skills = "scviva._skills.install:main"
 
 [dependency-groups]
 dev = [ "pre-commit", "twine>=4.0.2" ]
