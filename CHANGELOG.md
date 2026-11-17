@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ResolVI.setup_anndata(..., prepare_data=True)` now stores each cell's true k nearest spatial
+  neighbors in `obsm["index_neighbor"]`, with squared Euclidean distances in
+  `obsm["distance_neighbor"]`. Before, the scanpy distance graph was squared with `**`, which on
+  a sparse matrix is the matrix power, so cells got neighbors of neighbors (almost no overlap
+  with the true spatial kNN). Neighbors cached in an AnnData by an older release are recomputed
+  on the next `setup_anndata` call. resolVI models trained with `prepare_data=True` should be
+  retrained. Reported by Giacomo Cinnirella.
+- `pip install "scviva-tools[all]"` works on macOS and Windows again. The RAPIDS packages in the
+  `rapids`, `rapids-cuda12` and `rapids-cuda13` extras (cuML, cuGraph, cuPy, rapids-singlecell)
+  are now installed only on Linux, the only platform RAPIDS supports. Before, `[all]` pulled in
+  `cupy`, whose source build fails on macOS with `Error: macOS is no longer supported`.
+- `import scviva` now loads the `data`, `external`, `model`, `module`, `train` and `utils`
+  subpackages, as `import scvi` does, so `scviva.model.ResolVI`, `scviva.external.Tangram`
+  and similar paths work without a separate import. Before, they raised
+  `AttributeError: module 'scviva' has no attribute 'model'` unless the submodule had already
+  been imported elsewhere, for example by `from scviva.model._resolvi import ResolVI`.
 - {meth}`scviva.tl.HarremanAnalysis.setup` is several hundred times faster under pandas 3:
   about 4 s instead of 20–45 min on a 2,600-spot Visium section with 31k genes. Under pandas 3,
   `AnnData.var_names` is backed by Arrow strings, and the interaction-database builders

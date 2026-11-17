@@ -41,6 +41,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Bump when ``_prepare_data`` changes the neighbors it computes, so that neighbors cached in
+# ``adata.uns["_resolvi_prepare_data_config"]`` by an older version are recomputed.
+_PREPARE_DATA_VERSION = 2
+
 
 class ResolVI(
     SpatialNeighborhoodMixin,
@@ -720,6 +724,7 @@ class ResolVI(
             batch_key = slice_key
         try:
             import scanpy
+            from sklearn.neighbors import sort_graph_by_row_values
             from sklearn.neighbors._base import _kneighbors_from_graph
         except ImportError as err:
             raise ImportError(
@@ -746,7 +751,11 @@ class ResolVI(
                 )
             except ImportError:
                 scanpy.pp.neighbors(sub_data, n_neighbors=n_neighbors + 5, use_rep=spatial_rep)
-            distances = sub_data.obsp["distances"] ** 2
+            # Square element-wise (``**`` on a sparse matrix is the matrix power D @ D),
+            # then sort each row by distance: ``_kneighbors_from_graph`` keeps the first
+            # ``n_neighbors`` stored entries per row.
+            distances = sub_data.obsp["distances"].power(2)
+            distances = sort_graph_by_row_values(distances, warn_when_not_sorted=False)
 
             distance_neighbor[index, :], index_neighbor_batch = _kneighbors_from_graph(
                 distances, n_neighbors, return_distance=True
@@ -801,7 +810,12 @@ class ResolVI(
             if prepare_data_kwargs is None:
                 prepare_data_kwargs = {}
             spatial_rep = prepare_data_kwargs.get("spatial_rep", "X_spatial")
-            effective_config = {"batch_key": batch_key, **prepare_data_kwargs}
+            # The version marker invalidates neighbors cached by older releases.
+            effective_config = {
+                "batch_key": batch_key,
+                **prepare_data_kwargs,
+                "neighbor_algorithm_version": _PREPARE_DATA_VERSION,
+            }
             stored_config = adata.uns.get("_resolvi_prepare_data_config", None)
             neighbors_valid = (
                 stored_config == effective_config

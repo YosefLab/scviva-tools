@@ -48,18 +48,23 @@ optional-dependencies.cuda = [ "mlx[cuda]", "torchaudio", "torchvision" ]
 optional-dependencies.file-sharing = [ "fcswrite", "gdown", "pooch", "readfcs" ]
 optional-dependencies.hub = [ "boto3", "dvc[s3]", "huggingface-hub" ]
 optional-dependencies.metal = [ "mlx-metal", "torchaudio", "torchvision" ]
-optional-dependencies.rapids = [ "cugraph", "cuml", "cupy", "rapids-singlecell[rapids]" ]
+optional-dependencies.rapids = [
+  "cugraph; sys_platform=='linux'",
+  "cuml; sys_platform=='linux'",
+  "cupy; sys_platform=='linux'",
+  "rapids-singlecell[rapids]; sys_platform=='linux'",
+]
 optional-dependencies.rapids-cuda12 = [
-  "cugraph-cu12>=24",
-  "cuml-cu12>=24",
-  "cupy-cuda12x",
-  "rapids-singlecell-cu12[rapids]",
+  "cugraph-cu12>=24; sys_platform=='linux'",
+  "cuml-cu12>=24; sys_platform=='linux'",
+  "cupy-cuda12x; sys_platform=='linux'",
+  "rapids-singlecell-cu12[rapids]; sys_platform=='linux'",
 ]
 optional-dependencies.rapids-cuda13 = [
-  "cugraph-cu13>=24",
-  "cuml-cu13>=24",
-  "cupy-cuda13x",
-  "rapids-singlecell-cu13[rapids]",
+  "cugraph-cu13>=24; sys_platform=='linux'",
+  "cuml-cu13>=24; sys_platform=='linux'",
+  "cupy-cuda13x; sys_platform=='linux'",
+  "rapids-singlecell-cu13[rapids]; sys_platform=='linux'",
 ]
 optional-dependencies.spatial = [
   "geomloss",
