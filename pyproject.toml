@@ -73,7 +73,7 @@ optional-dependencies.spatial = [
   "pooch",
   "pynndescent",
   "seaborn",
-  "spatialdata>=0.2",
+  "spatialdata>=0.8",
   "squidpy>=1.4",
   "torch-geometric",
 ]
