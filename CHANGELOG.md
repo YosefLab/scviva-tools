@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CSDE** (Boyeau et al. 2026): corrected spatial differential expression via
+  prediction-powered inference, ported from JAX to PyTorch. Adds `scviva.tl.CSDEAnalysis`,
+  the functional `scviva.tools.csde.tl.run_csde` API, Poisson and negative-binomial
+  per-class-intercept PPI models, Adam/SGD/L-BFGS optimizers, SpatialData/annotation-directory
+  helpers (`load_annotations`, `prepare_csde_inputs`), a user guide page and a tutorial.
+  `adata_pred` is reindexed to `adata_gt.var_names` before fitting (a `ValueError` is raised if
+  the gene sets differ).
+- The `spatial` extra now requires `spatialdata>=0.8`; `spatialdata` 0.7.x crashes on
+  `TableModel.parse()` with `anndata>=0.13`.
+
 ### Changed
 
 - The documentation is built with `scverse-doc` on Sphinx 9 and uses its sidebar layout:
@@ -301,23 +313,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     missing from this repo; imported from upstream scvi-tools'
     `docs/user_guide/models/figures/` into the same path here. One broken ref to a
     never-written `counterfactual_prediction` background page dropped
-- **CSDE**: `docs/user_guide/models/csde.md` was never added to the models
-  toctree, so the `-W` docs build (above) failed on Read the Docs with a
-  `toc.not_included` warning-as-error; added to `docs/user_guide/models/index.md`
-- **CSDE**: `run_csde()`/`CSDEAnalysis.fit()` combined `adata_gt` and `adata_pred`'s
-  expression matrices by raw column position without checking gene order matched;
-  a differently-ordered (but same-content) `adata_pred` silently corrupted results by
-  pairing each gene's ground-truth counts with a different gene's prediction counts.
-  `_build_and_fit()` now reindexes `adata_pred` to `adata_gt.var_names` first, and
-  raises `ValueError` if the two don't share an identical gene set
-- **CSDE tests / CUDA CI**: `spatialdata`'s minimum pin (`>=0.2`) let the CUDA test
-  job resolve `spatialdata==0.7.3` alongside `anndata>=0.13`; anndata 0.13 moved `.X`
-  into `.layers` under a `None` key, which crashed spatialdata 0.7.3's
-  `validate_table_attr_keys` (`AttributeError: 'NoneType' object has no attribute
-  'lower'`) on every `TableModel.parse()` call, failing all `test_annotation.py`/
-  `test_csde_analysis.py` fixtures. Bumped to `spatialdata>=0.8`, which handles the
-  `None` layers key correctly (verified by reproducing the failure and the fix in
-  isolated venvs)
 
 ### Removed
 
