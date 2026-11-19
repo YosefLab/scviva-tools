@@ -1,5 +1,4 @@
 import time
-from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -7,14 +6,14 @@ import torch
 from anndata import AnnData
 from scipy.cluster.hierarchy import linkage
 from scipy.spatial.distance import squareform
-from scipy.stats import hypergeom, norm, pearsonr, spearmanr, zscore
+from scipy.stats import norm, zscore
 from sklearn.decomposition import PCA
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
-from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata
+from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata_for_genes
 from scviva.tools.harreman.tools.knn import make_weights_non_redundant
-from scviva.utils import resolve_device
+from scviva.utils import resolve_device, stats_dtype
 
 from .local_autocorrelation import center_counts_torch
 
@@ -55,7 +54,6 @@ def calculate_module_scores(
     layer_key = adata.uns["layer_key"]
     model = adata.uns["model"]
 
-    use_raw = layer_key == "use_raw"
     modules = adata.uns["gene_modules_dict"].copy()
 
     umi_counts = adata.uns["umi_counts"]
@@ -75,7 +73,8 @@ def calculate_module_scores(
         module_genes = modules[module]
 
         scores, loadings = compute_scores(
-            adata[:, module_genes],
+            adata,
+            module_genes,
             layer_key,
             model,
             umi_counts,
@@ -89,7 +88,9 @@ def calculate_module_scores(
 
     module_scores = pd.DataFrame(module_scores)
 
-    module_scores.index = adata.obs_names if not use_raw else adata.raw.obs.index
+    # `obs_names` is identical between `adata` and `adata.raw` (only `var` differs);
+    # `Raw` has no `.obs` attribute, so this must not branch on `use_raw`.
+    module_scores.index = adata.obs_names
 
     adata.obsm["module_scores"] = module_scores
     adata.varm["gene_loadings"] = gene_loadings
@@ -101,23 +102,31 @@ def calculate_module_scores(
     return
 
 
-def compute_scores(adata, layer_key, model, num_umi, device, _lambda=0.9):
-    """counts_sub: row-subset of counts matrix with genes in the module"""
+def compute_scores(adata, genes, layer_key, model, num_umi, device, _lambda=0.9):
+    """counts_sub: row-subset of counts matrix with genes in the module.
+
+    ``adata`` must be the *full* (unsliced) object, not a gene-subset view:
+    ``adata[:, genes].raw.X`` silently ignores the gene subset when
+    ``layer_key == "use_raw"`` (an AnnData limitation), so the subset is
+    applied internally via :func:`counts_from_anndata_for_genes` instead.
+    """
+    dtype = stats_dtype(device)
+
     # Get the weights matrix
     weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
     weights = torch.sparse_coo_tensor(
         torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=torch.float64, device=device),
+        torch.tensor(weights.data, dtype=dtype, device=device),
         torch.Size(weights.shape),
         device=device,
     )
 
     # Get gene expression counts for the module (dense)
-    counts_sub = counts_from_anndata(adata, layer_key, dense=True)
+    counts_sub = counts_from_anndata_for_genes(adata, genes, layer_key, dense=True)
 
     # Convert to tensors
-    num_umi = torch.tensor(num_umi, dtype=torch.float64, device=device)
-    counts_sub = torch.tensor(counts_sub, dtype=torch.float64, device=device)
+    num_umi = torch.tensor(num_umi, dtype=dtype, device=device)
+    counts_sub = torch.tensor(counts_sub, dtype=dtype, device=device)
 
     # Center values
     sample_specific = "sample_key" in adata.uns.keys()
@@ -144,7 +153,7 @@ def compute_scores(adata, layer_key, model, num_umi, device, _lambda=0.9):
 
     # Perform PCA on cells (transpose to cells x genes)
     pca_data = cc_smooth.T.cpu().numpy()
-    pca = PCA(n_components=1)
+    pca = PCA(n_components=1, random_state=0)
     scores = pca.fit_transform(pca_data)
     loadings = pca.components_.T
 
@@ -431,6 +440,8 @@ def create_modules(
     core_only : bool, optional (default: False)
         If True, assigns only tightly correlated (core) genes to modules and leaves others
         unassigned.
+    verbose : bool, optional (default: False)
+        If True, print progress messages and the elapsed time.
 
     Returns
     -------
@@ -544,7 +555,7 @@ def compute_top_scoring_modules(
         columns=adata.obsm[MODULE_KEY].columns,
     )
 
-    top_scoring_modules = pd.Series(index=df.index)
+    top_scoring_modules = pd.Series(index=df.index, dtype=object)
     for mod_id, row in df.iterrows():
         above_threshold_low = row > 0
         above_threshold = row > sd
@@ -592,6 +603,7 @@ def calculate_super_module_scores(
     -------
     None
         The following results are stored in the `AnnData` object:
+
         - `adata.obsm['super_module_scores']`: (cells x super-modules) DataFrame with
           per-cell super-module activity scores
         - `adata.varm['gene_loadings_sm']`: (genes x super-modules) DataFrame with gene
@@ -610,8 +622,6 @@ def calculate_super_module_scores(
 
     layer_key = adata.uns["layer_key"]
     model = adata.uns["model"]
-
-    use_raw = layer_key == "use_raw"
 
     umi_counts = adata.uns["umi_counts"]
 
@@ -636,7 +646,8 @@ def calculate_super_module_scores(
             continue
 
         scores, loadings = compute_scores(
-            adata[:, super_module_genes],
+            adata,
+            super_module_genes,
             layer_key,
             model,
             umi_counts,
@@ -649,7 +660,9 @@ def calculate_super_module_scores(
 
     super_module_scores = pd.DataFrame(super_module_scores)
     if not super_module_scores.empty:
-        super_module_scores.index = adata.obs_names if not use_raw else adata.raw.obs.index
+        # See the analogous fix in calculate_module_scores above: `Raw` has no
+        # `.obs`, and `obs_names` never differs between `adata`/`adata.raw`.
+        super_module_scores.index = adata.obs_names
 
     adata.varm["gene_loadings_sm"] = gene_loadings_sm
     adata.obsm["super_module_scores"] = super_module_scores
@@ -658,227 +671,3 @@ def calculate_super_module_scores(
     print("Finished computing super-module scores in %.3f seconds" % (time.time() - start))
 
     return
-
-
-def _compute_sig_mod_enrichment(
-    adata: AnnData, norm_data_key: str, signature_varm_key: str, use_super_modules: bool
-):
-    """Hypergeometric enrichment of signatures against Hotspot modules."""
-    gene_modules_key = "gene_modules_sm" if use_super_modules else "gene_modules"
-
-    use_raw = norm_data_key == "use_raw"
-    genes = adata.raw.var.index if use_raw else adata.var_names
-
-    sig_matrix = (
-        adata.varm[signature_varm_key] if not use_raw else adata.raw.varm[signature_varm_key]
-    )
-    gene_modules = adata.uns[gene_modules_key]
-
-    signatures = {}
-    for signature in sig_matrix.columns:
-        if all(x in sig_matrix[signature].unique().tolist() for x in [-1, 1]):
-            signatures[signature + "_UP"] = sig_matrix[sig_matrix[signature] == 1].index.tolist()
-            signatures[signature + "_DOWN"] = sig_matrix[
-                sig_matrix[signature] == -1
-            ].index.tolist()
-        else:
-            signatures[signature] = sig_matrix[sig_matrix[signature] != 0].index.tolist()
-
-    pvals_df = pd.DataFrame(
-        np.nan, index=list(signatures.keys()), columns=list(gene_modules.keys())
-    )
-    stats_df = pd.DataFrame(
-        np.nan, index=list(signatures.keys()), columns=list(gene_modules.keys())
-    )
-
-    sig_mod_df = pd.DataFrame(index=genes)
-
-    universe = adata.var_names[adata.var["local_autocorrelation"]].tolist()
-    signatures = {
-        sig: [g for g in sig_genes if g in universe] for sig, sig_genes in signatures.items()
-    }
-
-    for signature, sig_genes in signatures.items():
-        for module, mod_genes in gene_modules.items():
-            sig_mod_genes = list(set(sig_genes) & set(mod_genes))
-            M = len(universe)
-            n = len(sig_genes)
-            N = len(mod_genes)
-            x = len(sig_mod_genes)
-            pval = hypergeom.sf(x - 1, M, n, N)
-            if pval < 0.05:
-                sig_mod_name = signature + "_OVERLAP_" + module
-                sig_mod_df[sig_mod_name] = 0
-                sig_mod_df.loc[sig_mod_genes, sig_mod_name] = 1.0
-            e_overlap = n * N / M if M != 0 else 0
-            stat = np.log2(x / e_overlap) if e_overlap != 0 else 0
-            pvals_df.loc[signature, module] = pval
-            stats_df.loc[signature, module] = stat
-
-    fdr_values = multipletests(pvals_df.unstack().values, method="fdr_bh")[1]
-    fdr_df = pd.Series(fdr_values, index=pvals_df.stack().index).unstack()
-
-    adata.varm["signatures_overlap"] = sig_mod_df
-
-    return pvals_df, stats_df, fdr_df
-
-
-def _compute_sig_mod_correlation(adata: AnnData, method: str, use_super_modules: bool):
-    """Pearson or Spearman correlation between signature and module scores."""
-    module_scores_key = "super_module_scores" if use_super_modules else "module_scores"
-
-    signatures = adata.obsm["vision_signatures"].columns.tolist()
-    modules = adata.obsm[module_scores_key].columns.tolist()
-
-    cor_pval_df = pd.DataFrame(index=modules)
-    cor_coef_df = pd.DataFrame(index=modules)
-
-    for signature in signatures:
-        correlation_values = []
-        pvals = []
-        for module in modules:
-            sig_scores = adata.obsm["vision_signatures"][signature]
-            mod_scores = adata.obsm[module_scores_key][module]
-            if method == "pearson":
-                corr, pval = pearsonr(sig_scores, mod_scores)
-            else:
-                corr, pval = spearmanr(sig_scores, mod_scores)
-            correlation_values.append(corr)
-            pvals.append(pval)
-        cor_coef_df[signature] = correlation_values
-        cor_pval_df[signature] = pvals
-
-    fdr_values = multipletests(cor_pval_df.unstack().values, method="fdr_bh")[1]
-    cor_fdr_df = pd.Series(fdr_values, index=cor_pval_df.stack().index).unstack()
-
-    return cor_coef_df, cor_pval_df, cor_fdr_df
-
-
-def integrate_vision_hotspot_results(
-    adata: AnnData,
-    cor_method: Literal["pearson", "spearman"] = "pearson",
-    use_super_modules: bool = False,
-) -> None:
-    """
-    Integrate VISION signature scoring with Hotspot module assignments.
-
-    Requires that VISION signature scoring has already been run (producing
-    ``adata.obsm['vision_signatures']``, ``adata.uns['norm_data_key']``, and
-    ``adata.uns['signature_varm_key']``) and that Hotspot modules have been
-    created via :func:`create_modules` and scored via
-    :func:`calculate_module_scores` (or :func:`calculate_super_module_scores`
-    when ``use_super_modules=True``).
-
-    For each (signature, module) pair the function computes:
-
-    * A hypergeometric enrichment test of signature gene overlap with module
-      genes (log2 fold-enrichment, raw p-value, BH-FDR).
-    * Pearson or Spearman correlation between per-cell signature scores and
-      per-cell module activity scores.
-
-    An overlap signature matrix (genes present in significant signature–module
-    intersections) is also computed and stored for downstream use.
-
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data object. Must contain:
-
-        - ``obsm['vision_signatures']``: per-cell signature scores produced by
-          ``harreman.vision.signature.compute_signatures_anndata``.
-        - ``uns['norm_data_key']``: expression layer key used for signature
-          scoring (``None``, ``"use_raw"``, or a layer name).
-        - ``uns['signature_varm_key']``: key in ``adata.varm`` for the
-          gene × signature scoring matrix.
-        - ``uns['gene_modules']`` (or ``uns['gene_modules_sm']`` when
-          ``use_super_modules=True``): module → gene-list mapping produced by
-          :func:`calculate_module_scores` / :func:`calculate_super_module_scores`.
-        - ``obsm['module_scores']`` (or ``obsm['super_module_scores']``): per-cell
-          module activity scores.
-    cor_method : {'pearson', 'spearman'}, default 'pearson'
-        Correlation method used to relate signature scores to module scores.
-    use_super_modules : bool, default False
-        If ``True``, use super-module gene lists and scores (``gene_modules_sm``
-        / ``super_module_scores``) instead of the standard module equivalents.
-
-    Returns
-    -------
-    None
-        Results are stored in-place on ``adata``:
-
-        - ``uns['sig_mod_enrichment_stats']``: log2 fold-enrichment
-          (signatures × modules).
-        - ``uns['sig_mod_enrichment_pvals']``: raw hypergeometric p-values
-          (signatures × modules).
-        - ``uns['sig_mod_enrichment_FDR']``: BH-corrected FDR values
-          (signatures × modules).
-        - ``uns['sig_mod_correlation_coefs']``: correlation coefficients
-          (modules × signatures).
-        - ``uns['sig_mod_correlation_pvals']``: raw correlation p-values
-          (modules × signatures).
-        - ``uns['sig_mod_correlation_FDR']``: BH-corrected FDR values
-          (modules × signatures).
-        - ``uns['cor_method']``: the correlation method used.
-        - ``varm['signatures_overlap']``: binary gene × overlap-signature matrix
-          for signature–module intersections with p < 0.05.
-        - ``obsm['signature_modules_overlap']``: per-cell scores for each
-          significant signature–module overlap.
-    """
-    from scviva.tools.harreman.vision.signature import compute_vision_signatures
-
-    gene_modules_key = "gene_modules_sm" if use_super_modules else "gene_modules"
-
-    if "vision_signatures" not in adata.obsm:
-        raise ValueError(
-            "adata.obsm['vision_signatures'] not found. "
-            "Run VISION signature scoring before calling this function."
-        )
-    if gene_modules_key not in adata.uns or len(adata.uns[gene_modules_key]) == 0:
-        raise ValueError(
-            f"adata.uns['{gene_modules_key}'] not found or empty. "
-            "Run create_modules() (and calculate_super_module_scores() if "
-            "use_super_modules=True) before calling this function."
-        )
-    if cor_method not in ("pearson", "spearman"):
-        raise ValueError(f"Invalid cor_method '{cor_method}'. Choose 'pearson' or 'spearman'.")
-
-    norm_data_key = adata.uns["norm_data_key"]
-    signature_varm_key = adata.uns["signature_varm_key"]
-
-    start = time.time()
-    print("Integrating VISION and Hotspot results...")
-
-    pvals_df, stats_df, fdr_df = _compute_sig_mod_enrichment(
-        adata, norm_data_key, signature_varm_key, use_super_modules
-    )
-    adata.uns["sig_mod_enrichment_stats"] = stats_df
-    adata.uns["sig_mod_enrichment_pvals"] = pvals_df
-    adata.uns["sig_mod_enrichment_FDR"] = fdr_df
-
-    adata.uns["cor_method"] = cor_method
-    cor_coef_df, cor_pval_df, cor_fdr_df = _compute_sig_mod_correlation(
-        adata, cor_method, use_super_modules
-    )
-    adata.uns["sig_mod_correlation_coefs"] = cor_coef_df
-    adata.uns["sig_mod_correlation_pvals"] = cor_pval_df
-    adata.uns["sig_mod_correlation_FDR"] = cor_fdr_df
-
-    # Score the per-module overlap genes as signatures.  We temporarily call
-    # compute_vision_signatures with a different varm key, then move the result
-    # to the correct obsm slot and restore the original vision_signatures scores.
-    _saved_vision_sigs = adata.obsm.get("vision_signatures")
-    compute_vision_signatures(
-        adata,
-        norm_data_key=norm_data_key,
-        signature_varm_key="signatures_overlap",
-    )
-    adata.obsm["signature_modules_overlap"] = adata.obsm.pop("vision_signatures")
-    if _saved_vision_sigs is not None:
-        adata.obsm["vision_signatures"] = _saved_vision_sigs
-    # Restore uns keys that compute_vision_signatures overwrote
-    adata.uns["norm_data_key"] = norm_data_key
-    adata.uns["signature_varm_key"] = signature_varm_key
-
-    print(
-        "Finished integrating VISION and Hotspot results in %.3f seconds" % (time.time() - start)
-    )

@@ -125,3 +125,24 @@ def test_gimvi_lazy_import():
     import scviva
 
     assert hasattr(scviva, "GIMVI") or "GIMVI" in scviva.__all__
+
+
+def test_gimvi_save_forwards_anndata_write_kwargs(gimvi_data, tmp_path, monkeypatch):
+    """`**anndata_write_kwargs` must reach AnnData.write for both datasets."""
+    from anndata import AnnData
+
+    adata_seq, adata_spatial = gimvi_data
+    model = _setup_and_build(adata_seq.copy(), adata_spatial.copy())
+
+    calls = []
+    original_write = AnnData.write
+
+    def spy_write(self, filename=None, **kwargs):
+        calls.append(kwargs)
+        return original_write(self, filename, **kwargs)
+
+    monkeypatch.setattr(AnnData, "write", spy_write)
+    model.save(tmp_path / "gimvi", save_anndata=True, compression="gzip")
+
+    assert len(calls) == 2
+    assert all(kw.get("compression") == "gzip" for kw in calls)

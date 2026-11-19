@@ -207,6 +207,7 @@ class DIAGVI(SpatialBaseModel, VAEMixin):
         datasplitter_kwargs
             Additional keyword arguments for the DataSplitter and DataLoaders.
             Can be either:
+
             - A dict of shared kwargs applied to all modalities
             - A nested dict mapping modality names to their specific kwargs,
               e.g., ``{"rna": {"external_indexing": [train, val, test]}, "protein": {...}}``
@@ -527,6 +528,17 @@ class DIAGVI(SpatialBaseModel, VAEMixin):
         (once per modality, extracting the relevant table from your ``SpatialData``
         objects), then construct ``DIAGVI({"modality_a": adata_a, "modality_b": adata_b})``
         directly.
+
+        Parameters
+        ----------
+        sdata
+            Ignored; this method always raises :class:`NotImplementedError`.
+        table_key
+            Ignored; this method always raises :class:`NotImplementedError`.
+        region
+            Ignored; this method always raises :class:`NotImplementedError`.
+        **model_kwargs
+            Ignored; this method always raises :class:`NotImplementedError`.
         """
         raise NotImplementedError(
             "DIAGVI is a multi-modal model and cannot be constructed from a single "
@@ -1194,6 +1206,9 @@ class DIAGVI(SpatialBaseModel, VAEMixin):
             Indices of cells to predict. If ``None``, all cells are used.
         batch_size
             Minibatch size for data loading.
+        deterministic
+            If ``True``, classify the posterior mean of the latent variable (``qz.loc``);
+            otherwise classify a sample from the posterior.
 
         Returns
         -------

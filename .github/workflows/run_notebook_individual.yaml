@@ -19,6 +19,8 @@ on:
           - scVIVA_tutorial.ipynb
           - stereoscope_heart_LV_tutorial.ipynb
           - tangram_scvi_tools.ipynb
+          - Vision_tutorial.ipynb
+          - Visium_colon_Harreman_pipeline.ipynb
 
       version:
         description: "latest/stable/semver/branch"
@@ -30,7 +32,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: ./.github/workflows/run_notebook.yaml
+    uses: $/.github/workflows/run_notebook.yaml
     with:
       notebook: ${{ inputs.notebook }}
       version: ${{ inputs.version }}

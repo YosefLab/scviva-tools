@@ -70,6 +70,7 @@ def compute_knn_graph(
     tree=None,
     use_gpu: bool | None = None,
     verbose: bool | None = False,
+    random_state: int | np.random.Generator | None = 0,
 ):
     """Computes the spatial proximity graph.
 
@@ -103,6 +104,10 @@ def compute_knn_graph(
         and falls back to CPU automatically; ``False`` forces CPU; ``True`` raises if GPU fails.
     verbose
         Whether to print progress and status messages.
+    random_state
+        Seed (or generator) for the random tie-breaking in the tree-based
+        KNN path (used only when ``tree`` is given), for reproducible
+        neighbor selection. Defaults to ``0``.
     """
     start = time.time()
 
@@ -127,7 +132,7 @@ def compute_knn_graph(
             raise ValueError(
                 "When using `tree` as the metric space, `weighted_graph=True` is not supported"
             )
-        tree_neighbors_and_weights(adata, tree, n_neighbors=n_neighbors)
+        tree_neighbors_and_weights(adata, tree, n_neighbors=n_neighbors, random_state=random_state)
 
     if compute_neighbors_on_key is not None:
         if verbose:
@@ -435,7 +440,7 @@ def make_weights_non_redundant(weights):
     return w_no_redundant
 
 
-def tree_neighbors_and_weights(adata, tree, n_neighbors):
+def tree_neighbors_and_weights(adata, tree, n_neighbors, random_state=0):
     """Compute nearest neighbors and weights using distance along the tree object.
 
     Names of the leaves of the tree must match the columns in counts.
@@ -448,9 +453,13 @@ def tree_neighbors_and_weights(adata, tree, n_neighbors):
         The root of the tree
     n_neighbors: int
         Number of neighbors to find
+    random_state
+        Seed (or generator) for the random tie-breaking in :func:`_knn`, for
+        reproducible neighbor selection. Defaults to ``0``.
     """
     K = n_neighbors
     cell_labels = adata.obs_names
+    rng = np.random.default_rng(random_state)
 
     all_leaves = []
     for x in tree:
@@ -460,7 +469,7 @@ def tree_neighbors_and_weights(adata, tree, n_neighbors):
     all_neighbors = {}
 
     for leaf in tqdm(all_leaves):
-        neighbors = _knn(leaf, K)
+        neighbors = _knn(leaf, K, rng)
         all_neighbors[leaf.name] = neighbors
 
     cell_ix = {c: i for i, c in enumerate(cell_labels)}
@@ -478,11 +487,11 @@ def tree_neighbors_and_weights(adata, tree, n_neighbors):
     return
 
 
-def _knn(leaf, K):
+def _knn(leaf, K, rng):
 
     dists = _search(leaf, None, 0)
     dists = pd.Series(dists)
-    dists = dists + np.random.rand(len(dists)) * 0.9  # to break ties randomly
+    dists = dists + rng.random(len(dists)) * 0.9  # to break ties randomly, reproducibly
 
     neighbors = dists.sort_values().index[0:K].tolist()
 

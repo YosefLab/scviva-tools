@@ -18,7 +18,6 @@ The advantages of Tangram are:
 
 The limitations of Tangram include:
 
--   The scvi-tools model page is deprecated starting v1.5.
 -   It requires matched genes between the single-cell and spatial modalities used for
     training.
 -   Training is not mini-batched in the current implementation, so memory use depends on

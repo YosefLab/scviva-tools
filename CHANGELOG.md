@@ -7,7 +7,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The documentation is built with `scverse-doc` on Sphinx 9 and uses its sidebar layout:
+  Getting started, Guides (tutorials, user guide, developer documentation, architecture, FAQ),
+  Reference (API, models) and Project, with a new citation page, following
+  [scvi-tools#4091](https://github.com/scverse/scvi-tools/pull/4091). The Colab launch button on
+  tutorial pages, the download and full screen buttons, and the tutorial filters are kept, and
+  `[source]` links now point to GitHub instead of highlighted copies of the code.
+
+### Fixed
+
+- `ResolVI.setup_anndata(..., prepare_data=True)` now stores each cell's true k nearest spatial
+  neighbors in `obsm["index_neighbor"]`, with squared Euclidean distances in
+  `obsm["distance_neighbor"]`. Before, the scanpy distance graph was squared with `**`, which on
+  a sparse matrix is the matrix power, so cells got neighbors of neighbors (almost no overlap
+  with the true spatial kNN). Neighbors cached in an AnnData by an older release are recomputed
+  on the next `setup_anndata` call. resolVI models trained with `prepare_data=True` should be
+  retrained. Reported by Giacomo Cinnirella.
+- `pip install "scviva-tools[all]"` works on macOS and Windows again. The RAPIDS packages in the
+  `rapids`, `rapids-cuda12` and `rapids-cuda13` extras (cuML, cuGraph, cuPy, rapids-singlecell)
+  are now installed only on Linux, the only platform RAPIDS supports. Before, `[all]` pulled in
+  `cupy`, whose source build fails on macOS with `Error: macOS is no longer supported`.
+- `import scviva` now loads the `data`, `external`, `model`, `module`, `train` and `utils`
+  subpackages, as `import scvi` does, so `scviva.model.ResolVI`, `scviva.external.Tangram`
+  and similar paths work without a separate import. Before, they raised
+  `AttributeError: module 'scviva' has no attribute 'model'` unless the submodule had already
+  been imported elsewhere, for example by `from scviva.model._resolvi import ResolVI`.
+- {meth}`scviva.tl.HarremanAnalysis.setup` is several hundred times faster under pandas 3:
+  about 4 s instead of 20–45 min on a 2,600-spot Visium section with 31k genes. Under pandas 3,
+  `AnnData.var_names` is backed by Arrow strings, and the interaction-database builders
+  (`extract_lr_pairs`, `build_LR_matrix` and `extract_transporter_info` in
+  `scviva.tools.harreman.preprocessing.database`) called `Series.isin` against it once per
+  interaction, which re-converts the whole gene index on every call. Gene membership is now
+  checked against a set. The resulting tables are unchanged.
+- Ligand-receptor interactions are grouped under their CellChat `pathway_name` again in
+  {meth}`scviva.tl.HarremanAnalysis.compute_cell_communication`, in both `"standard"` and
+  `"cell_type"` mode. The relabeling used a chained assignment, which pandas 3 copy-on-write
+  turns into a silent no-op, so metabolite-level results and `adata.uns["gene_pair_dict"]` were
+  keyed by individual interaction names (e.g. `CCL19_CCR7`) instead of pathways.
+
+## [0.1.8] - 2026-10-28
+
+### Changed
+
+- **Harreman and VISION accessor methods now expose their real arguments.** The
+  `ha.hs`, `ha.vs`, `ha.tl`, `ha.pl` (`HarremanAnalysis`) and `va.tl` (`VisionAnalysis`)
+  methods were `(adata=None, **kwargs)` wrappers without docstrings, so `help()`, IDE
+  tooltips and the API docs showed no arguments. They are now built by a new
+  `scviva.tools._accessor.adata_delegate` helper that copies the signature and docstring
+  of the forwarded function (`adata` optional, remaining arguments keyword-only). Call
+  syntax is unchanged and existing code and tutorials keep working.
+- Accessor classes renamed to public names and exported:
+  `scviva.tools.harreman.HarremanHotspotAccessor`, `HarremanVisionAccessor`,
+  `HarremanToolsAccessor`, `HarremanPlottingAccessor`, and
+  `scviva.tools.vision.VisionToolsAccessor`.
+- Fix {meth}`scviva.model.DestVI.from_rna_model` with a {class}`scvi.model.CondSCVI` trained with
+  the default `prior="normal"`: it raised a `KeyError` when `prior` was not passed explicitly and
+  a `TypeError` because the VampPrior from {meth}`scvi.model.CondSCVI.get_vamp_prior` was
+  registered as numpy buffers. The VampPrior of {class}`scviva.module.MRDeconv` is now built from
+  its buffers, so it follows the module to GPU and MPS devices.
+- `pooch` and `igraph` are now imported lazily and guarded with the
+  {func}`scvi.utils.dependencies` decorator, so `import scviva` no longer requires them.
+  `pooch` is needed only by the Harreman dataset/database loaders
+  (`load_visium_mouse_colon_dataset`, `load_slide_seq_human_lung_dataset`,
+  `load_metabolic_genes`, `extract_transporter_info`, `extract_lr_pairs`) and `igraph` only
+  by VISION clustering (`VisionAnalysis._cluster_cells`); calling them without the package
+  installed raises a clear `ModuleNotFoundError` naming it. `igraph` moved from the core
+  dependencies to the `tutorials` extra (`pooch` is already in the `spatial` extra).
+
+### Documentation
+
+- Expanded the installation page following the scvi-tools one: a "Prerequisites" section on
+  creating a virtual environment with `conda` (Miniforge/Mamba) or `venv` (uv), GPU/PyTorch
+  notes, the full list of optional extras (`cuda`, `metal`, `tpu`, `hub`, `vision`,
+  `rapids-cuda12`, ...), Google Colab and Docker sections.
+- Google Colab support for the tutorials: notebook pages now have an "Open in Colab" launch
+  button (`launch_buttons` in `docs/conf.py`), and every tutorial starts with the same install
+  cell that, only inside Colab, runs the [scvi-colab](https://github.com/scverse/scvi-colab)
+  helper and installs `scviva-tools[tutorials]` plus the tutorial-specific packages. This
+  replaces the previous per-notebook install cells, which either did not install scviva-tools
+  (DiagVI) or installed packages outside of Colab as well.
+- Tutorials no longer require `rapids_singlecell`. Each tutorial that uses it has a dedicated
+  cell that sets `HAS_RSC` when `rapids_singlecell` is importable and a GPU is usable (so a CPU
+  runtime on Google Colab is handled), and the neighbors/UMAP steps fall back to scanpy
+  otherwise. Unused `import rapids_singlecell as rsc` lines were removed (cell2location,
+  Stereoscope, Tangram, Harreman).
+- New "Analysis accessors" section in the User API listing the accessor classes.
+- Added an autosummary class template (`docs/_templates/autosummary/class.rst`) so class
+  pages render full documentation for every method and attribute, not only a table of
+  names. Methods that `scviva.module.*` classes inherit from `torch.nn.Module` are left
+  out to keep those pages readable.
+- User/Developer API pages now list every public object: `DIAGVI`, the VISION plotting
+  functions (`scviva.pl.vision.*`), the `scviva.tools.vision` functions and containers,
+  the Harreman hotspot/tools/preprocessing/datasets functions, and `scviva.utils`.
+- Docstrings (text only, no signature or behavior changes): documented the missing
+  constructor arguments of `DestVI`, `ResolVI`, `Tangram`, `nicheVAE`, `NicheDecoder`,
+  `VisionResults` and the accessor classes; documented where `**kwargs` are forwarded in
+  model constructors, `setup_anndata`/`from_rna_model`/`from_spatialdata` and other model
+  methods, `VisionAnalysis.compute_latent_space`/`generate_projections`/`pool_cells`, and
+  `scviva.tools.vision.rank_genes_groups`; fixed parameter names in docstrings that no
+  longer matched the signature (`DestVI.from_rna_model` `**module_kwargs`, `Tangram`
+  `sc_adata`, `NicheDecoder.forward` `*cat_list`).
+- Fixed RST list formatting in the `calculate_super_module_scores`,
+  `select_significant_interactions` and `DIAGVI.train` docstrings, and added the
+  `Boyeau19` and `Ionides2008` references cited by inherited scvi-tools docstrings, so the
+  docs build (`-W`) stays warning-free now that every method is rendered.
+- Completed the remaining parameter documentation (text only, no signature changes) for
+  the VISION plotting functions, `plot_interaction_module_correlation`,
+  `plot_connectivity_distribution`, `VisionAnalysis` methods, `SCVIVA.setup_anndata` and
+  `get_latent_representation`, `DIAGVI.from_spatialdata`/`predict_celltype`, the `JVAE`
+  and `nicheVAE` module methods, `create_modules`, `rank_genes_groups`,
+  `resolve_device`/`stats_dtype`, and the `setup_anndata` methods of `GIMVI` and the
+  Stereoscope models; added docstrings to `DirichletDecoder.forward` and the
+  `get_field_data` methods of the spatial data fields.
+
+### Fixed
+
+- `GIMVI.save(..., save_anndata=True, **anndata_write_kwargs)` now passes
+  `anndata_write_kwargs` (e.g. `compression="gzip"`) to `AnnData.write`; they were
+  previously accepted and silently ignored.
+- `scviva.tools.vision.rank_genes_groups` now raises a clear `ValueError` for
+  `method="t-test"`, `"t-test_overestim_var"` or `"logreg"`, which were advertised but
+  never ported (they failed with an `AttributeError`). `method=None` now selects
+  `"wilcoxon"` instead of the unported `"t-test"`. Signatures are unchanged.
+
+## [0.1.7] - 2026-09-10
+
 ### Added
+
+- **Native Apple Silicon (MPS) support for scviva-tools' own harreman/hotspot code.**
+  `scviva.utils.resolve_device` now resolves `device="auto"` to `mps` (previously
+  cuda→cpu only, so Mac GPUs were silently ignored). Since MPS has no float64 kernel
+  support at all (a Metal hardware limitation, not a version gap), every
+  local-correlation/-autocorrelation and cell-cell-communication routine that used to
+  hard-code `torch.float64` now uses the new `scviva.utils.stats_dtype(device)` helper,
+  which returns `float32` on `mps` and keeps `float64` on `cpu`/`cuda`. Models that
+  train via scvi-tools' Lightning trainer (GimVI, DestVI, ResolVI, DiagVI, Stereoscope,
+  Tangram, SCVIVA's NicheVAE) can train on `mps` once scvi-tools resolves
+  `accelerator="mps"` — either passed explicitly, or via `accelerator="auto"` when the
+  `SCVI_ALLOW_MPS_AUTO=1` environment variable is set. scvi-tools' own `auto` resolution
+  deliberately keeps defaulting to `cpu` otherwise (see `scvi.model._utils.parse_device_args`)
+  so existing users' behavior doesn't silently change; the new `test_mps.yaml` CI workflow
+  (below) sets that variable so these models are actually exercised on `mps` in CI, not just
+  the harreman/hotspot code. Verified end-to-end training on MPS for ResolVI and SCVIVA
+  specifically, since both sample raw `torch`/`pyro`
+  Gamma/Dirichlet/Poisson distributions (native MPS kernels as of torch 2.14) outside
+  of `scvi.distributions`' own MPS guards. Also fixed `ResolVI.compute_dataset_dependent_priors`
+  returning numpy `float64` scalars (`background_ratio`, `median_distance`, etc.) that
+  `RESOLVAE` registers as buffers via `torch.tensor(...)`; on MPS this silently inherited
+  float64 and crashed on `.to("mps")` during module setup — now cast to Python `float`,
+  matching the existing `float(...)` idiom already used for
+  `downsample_counts_mean`/`std` in `_resolvae.py`. Full test suite (271 tests) passes
+  identically on CPU and MPS.
+
+- Dedicated **MPS CI workflow** (`.github/workflows/test_mps.yaml`), mirroring scvi-tools'
+  own `test_mps.yaml`: runs the full test suite on a real Apple Silicon GitHub-hosted
+  runner (`macos-14`) with `SCVI_ALLOW_MPS_AUTO=1`, `PYTORCH_ENABLE_MPS_FALLBACK=0`, and
+  `PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0` so `accelerator="auto"`-trained models actually
+  exercise `mps` instead of silently staying on `cpu`. Adds the corresponding
+  `test-metal` hatch environment (`metal` + `spatial` features) to `pyproject.toml`,
+  mirroring the existing `test-cuda` env. Gated the same way as `test_macos.yaml`/
+  `test_cuda.yaml`: PR label (`mps tests`/`all tests`), daily schedule, or manual dispatch.
 
 - **DiagVI** model (`scviva.external.diagvi.DIAGVI`), migrated from scvi-tools, for
   cross-modality alignment of paired spatial transcriptomics/proteomics data via a
@@ -18,9 +179,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared `CyclicMultiDataLoader` (`scviva.model.utils._dataloaders`), consolidating
   the near-identical cyclic-batch dataloader previously duplicated between GIMVI and
   DiagVI.
+- **VISION** signature-scoring and differential-expression toolkit
+  (`scviva.tools.vision.VisionAnalysis`), ported from `visionpy`/R VISION
+  :cite:p:`DeTomaso19` into scviva-tools with a subpackage layout mirroring
+  Harreman's (`preprocessing/`, `tools/`, `phylo/`): per-cell signature
+  scoring, KNN-graph autocorrelation (Geary's C), one-vs-all/one-vs-one
+  differential expression, gene-importance ranking, signature clustering, and
+  micro-clustering/meta-cluster pooling. Ships with a standalone
+  `Vision_tutorial` notebook, a new VISION section in `DestVI_tutorial`, and
+  a `docs/user_guide/models/vision.md` model page.
+- **Harreman-VISION integration** (`scviva.tools.harreman.vision`,
+  `HarremanAnalysis.vs`), letting VISION signature scores be computed on top
+  of an existing Harreman KNN graph and cross-referenced against Harreman's
+  Hotspot gene modules (`integrate_vision_hotspot_results`).
+- `scviva.plotting.vision`: VISION-specific plotting functions, split out of
+  `scviva.plotting.harreman` to mirror the `tools/vision` vs `tools/harreman`
+  split.
 
 ### Changed
 
+- **DiagVI** now built on `SpatialBaseModel` (`setup_spatialdata()`, RAPIDS
+  backend support) instead of a standalone `BaseModelClass`.
+- Docs theme: the default Read the Docs search panel was replaced with the
+  scviva-tools logo; project scaffolding updated to scverse cookiecutter v0.8.
+- CI: GitHub Actions workflows updated for Python 3.14; CUDA workflows no
+  longer cache pip installs, avoiding repeated 10GB cache-quota evictions.
 - **Docs builds now treat warnings as errors** (`sphinx-build -W`), enforced both on
   Read the Docs (`sphinx.fail_on_warning`) and in a new CI `docs` job, mirroring
   scvi-tools' own doc-build hardening. `myst_heading_anchors` enabled so in-page
@@ -29,6 +212,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **VISION R-fidelity audit**: correctness and reproducibility fixes found by
+  auditing the port against the original R VISION implementation:
+  - Protein one-vs-all differential results were computed but discarded (only
+    the storage key was written); now persisted
+  - Degenerate two-site contingency tables now report "not significant" like
+    R's `matrix_chisq`, instead of maximal significance
+  - Gene importance now uses covariance (matching R's
+    `evalSigGeneImportance`/`sigGeneInner`) instead of a scale-free Pearson
+    correlation
+  - Added R's Wilcoxon continuity correction to one-vs-all differential
+    expression, with a defensive `p<=1` clip
+  - Meta-variable one-vs-all differential now applies one joint BH-FDR across
+    numeric and categorical tests per group, matching `clusterSigScores`
+  - Signature clustering rewritten as a BIC-selected Gaussian mixture over
+    significant signatures (approximating R's `Mclust` "EII"), replacing
+    plain Ward/Euclidean clustering
+  - `sig_norm_method` now threads into the Geary's C permutation-null
+    background scoring (previously hardcoded), removing an unnormalized
+    raw-matmul code path
+  - Micro-clustering's `K`/`filter_threshold` defaults corrected to match R's
+    actual formulas (5% of cells, no artificial floor)
+  - `pool_metadata` now reports `0.0` (not `NaN`) for categorical levels a
+    pool doesn't contain, matching R's `poolMetaData`
+  - Fixed a `visionpy`-inherited bug in the dense-matrix path of
+    `compute_signatures_anndata`: the z-score denominator divided variance by
+    gene count before the square root, inflating scores by an extra
+    `sqrt(n_genes)` factor relative to R and this module's own sparse path
+  - `norm_data_key` input is now auto-detected as already log-transformed
+    (and left alone) instead of being re-transformed; docstring corrected (R's
+    actual contract is the opposite of what was documented)
+  - `device="cpu"` now forces the deterministic scipy sparse path instead of a
+    non-bit-reproducible multi-threaded dense PyTorch path; Louvain
+    clustering, K-means readjustment, and permutation-null background
+    generation are now all seeded via new `random_state` parameters (default
+    `0`, so existing calls are unaffected)
+- **VISION correctness**: fixed BH-FDR index scrambling and tie-correction/NaN
+  bugs in `diffexp`, KNN self-loop bias, and several silent
+  `use_raw`/signature-splitting regressions
+- **VISION**: `_infer_obs_columns()` no longer treats all-unique
+  non-categorical columns (e.g. barcode/identifier columns) as usable
+  metadata, which previously crashed differential expression on real
+  metadata; `compute_signature_scores()` now restores
+  `adata.uns["signature_varm_key"]` after the permutation-null step instead of
+  leaving it pointed at the transient random-signature set (which broke
+  `integrate_vision_hotspot_results()`); `VisionAnalysis` now tracks whether
+  it built `adata.obsp["weights"]` itself, so it correctly reuses an
+  externally-built graph (e.g. from Harreman) instead of silently overwriting
+  it
+- **VISION**: `import scviva` no longer eagerly pulls in `diffexp` (and
+  therefore scanpy); `rank_genes_groups` is now exposed lazily.
+  `HarremanAnalysis.vs.compute_vision_signatures()` now has explicit defaults
+  instead of forwarding `**kwargs`, fixing the no-arg legacy call path;
+  `load_signatures()` now accepts a `varm_key` and writes to
+  `adata.raw.varm[varm_key]` under `use_raw=True`, fixing a raw/non-raw
+  gene-count mismatch crash; small (`<=5`) signature sets now get correctly
+  aligned random-background cluster labels
+- **VISION**: `compute_obs_df_scores()`/`_gearysc_for_dataframe()` no longer
+  raise `ZeroDivisionError` on constant (zero-variance) numeric `obs`
+  columns; these are now skipped and reported as "no detectable
+  autocorrelation"
+- **Harreman**: fixed `use_raw` crashes and silent bugs (`.raw.obs`,
+  gene-subset views into `.raw.X`, a database-storage key mismatch) and
+  unseeded RNGs across the hotspot, cell-communication, and KNN modules
+- **DiagVI**: corrected reference-batch/libsize imputation, `mapping_df`
+  collisions, and unlabeled-cell leakage into the classifier loss
 - 31 pre-existing Sphinx warnings uncovered by the new `-W` build, all docs/type-hint
   only with no runtime behavior change:
   - Stale `:doc:` tutorial cross-refs in `DestVI`/`GIMVI`/`SCVIVA`/`RNAStereoscope`/
@@ -70,6 +318,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test_csde_analysis.py` fixtures. Bumped to `spatialdata>=0.8`, which handles the
   `None` layers key correctly (verified by reproducing the failure and the fix in
   isolated venvs)
+
+### Removed
+
+- Confirmed-dead VISION code with no remaining call sites, found via a
+  post-audit sweep: `tools/diffexp.py::_calc_frac()` (logic already computed
+  inline elsewhere) and `_analysis.py::_pearson_cols()` (orphaned by the
+  gene-importance fix above).
 
 ## [0.1.6] - 2026-07-08
 

@@ -2,7 +2,7 @@
 
 ## The generative model
 
-All scVIVA-Tools models are based on **amortized variational inference** (AVI). The core idea
+All scviva-tools models are based on **amortized variational inference** (AVI). The core idea
 is to learn a probabilistic generative model $p_\theta(x \mid z)$ of observed gene expression $x$
 conditioned on a low-dimensional latent variable $z$, alongside an approximate posterior
 $q_\phi(z \mid x)$ parameterized by an encoder neural network.
@@ -32,5 +32,5 @@ encoder has learned a meaningful representation.
 
 ## References
 
-- Lopez et al. (2018) *Deep generative modeling for single-cell transcriptomics*. Nature Methods.
-- Levy et al. (2025) *scVIVA*. bioRxiv.
+- Lopez et al. (2018) _Deep generative modeling for single-cell transcriptomics_. Nature Methods.
+- Levy et al. (2025) _scVIVA_. bioRxiv.

@@ -1,1 +1,3 @@
-from .signature import compute_vision_signatures, load_signatures
+from ._integration import integrate_vision_hotspot_results
+
+__all__ = ["integrate_vision_hotspot_results"]

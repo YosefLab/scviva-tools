@@ -37,6 +37,36 @@ def set_seed(request):
     settings.seed = int(request.config.getoption("--seed"))
 
 
+def pytest_fixture_post_finalizer(fixturedef):
+    """Frees the MPS caching allocator's cached blocks after every fixture teardown.
+
+    Unlike CUDA's dedicated VRAM, MPS memory is unified with host RAM, and the whole
+    suite runs as one pytest process, so cached (but unused) tensor memory from each
+    test's models/optimizers must be reclaimed promptly or it accumulates across the
+    run and exhausts the shared pool, crashing unrelated later tests with "MPS backend
+    out of memory".
+
+    A function-scoped autouse fixture is not enough: pytest tears down function-scoped
+    fixtures before higher-scoped ones, so on the last test of a module the cache would
+    be purged *before* a module-scoped fixture (e.g. a trained model shared across the
+    module) releases its tensors -- leaving that memory cached, unreclaimed, right as
+    the next module's fixtures spin up. Hooking every fixture's finalizer instead (not
+    just function-scoped ones) purges the cache the moment any fixture's tensors --
+    regardless of scope -- actually become unreferenced.
+    """
+    del fixturedef
+    import gc
+
+    import torch
+
+    if torch.backends.mps.is_available():
+        # gc.collect() first: the caching allocator can only release blocks that are no
+        # longer referenced by Python (e.g. a trainer/model/optimizer held by the fixture
+        # that just tore down); empty_cache() alone leaves those blocks cached.
+        gc.collect()
+        torch.mps.empty_cache()
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip optional tests unless --optional is passed, and vice versa."""
     run_optional = config.getoption("--optional")

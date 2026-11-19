@@ -13,8 +13,10 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 from scviva.tools.harreman.hotspot import models
-from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata
-from scviva.utils import resolve_device
+from scviva.tools.harreman.preprocessing.anndata import (
+    counts_from_anndata_for_genes,
+)
+from scviva.utils import resolve_device, stats_dtype
 
 from ._metabolite_scoring import compute_metabolite_cs_ct
 from ._stats import compute_max_cs, flatten, z_to_pval_fdr
@@ -98,14 +100,15 @@ def compute_ct_cell_communication(
     -------
     None
         Results are stored in the following `adata.uns` fields:
-            - `ct_ccc_results["p"]`: parametric results per gene pair, metabolite, and cell type.
-            - `ct_ccc_results["np"]`: non-parametric scores, empirical p-values, and FDRs.
-            - `gene_pair_dict`: dictionary mapping metabolites to relevant gene pairs.
-            - `gene_pairs_ind`, `gene_pairs_ind_per_ct_pair`: index-referenced gene pair
-              representations.
-            - `D`: spatial node degree for each cell per cell type pair.
-            - `cells`, `genes`: ordered list of cells and genes used in analysis.
-            - (optional) `ct_ccc_results["np"]["analytic_null"]`: permutation null outputs.
+
+        - `ct_ccc_results["p"]`: parametric results per gene pair, metabolite, and cell type.
+        - `ct_ccc_results["np"]`: non-parametric scores, empirical p-values, and FDRs.
+        - `gene_pair_dict`: dictionary mapping metabolites to relevant gene pairs.
+        - `gene_pairs_ind`, `gene_pairs_ind_per_ct_pair`: index-referenced gene pair
+          representations.
+        - `D`: spatial node degree for each cell per cell type pair.
+        - `cells`, `genes`: ordered list of cells and genes used in analysis.
+        - (optional) `ct_ccc_results["np"]["analytic_null"]`: permutation null outputs.
     """
     start = time.time()
     device = resolve_device(device)
@@ -197,11 +200,10 @@ def run_ct_cell_communication_analysis(
     verbose: bool | None,
 ) -> None:
     """Run the cell type-aware CCC score and significance workflow."""
-    use_raw = (layer_key_p_test == "use_raw") & (layer_key_np_test == "use_raw")
-    obs = adata.raw.obs if use_raw else adata.obs
-    cells = (
-        adata.raw.obs.index.values.astype(str) if use_raw else adata.obs_names.values.astype(str)
-    )
+    # Cell metadata/obs_names never differ between `adata` and `adata.raw`,
+    # and `Raw` has no `.obs` attribute to read them from regardless.
+    obs = adata.obs
+    cells = adata.obs_names.values.astype(str)
 
     sample_specific = "sample_key" in adata.uns
 
@@ -336,8 +338,10 @@ def run_ct_cell_communication_analysis(
         Wtot2 = torch.sparse.sum(weights_sq, dim=(1, 2)).to_dense()
 
         # Load counts
-        counts = counts_from_anndata(adata[cells, genes], layer_key_p_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = counts_from_anndata_for_genes(
+            adata, genes, layer_key_p_test, dense=True, cells=cells
+        )
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
 
         # Prepare counts_1 and counts_2
@@ -440,8 +444,10 @@ def run_ct_cell_communication_analysis(
         adata.uns["ct_ccc_results"]["np"] = {"gp": {}, "m": {}}
 
         # Load counts
-        counts = counts_from_anndata(adata[cells, genes], layer_key_np_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = counts_from_anndata_for_genes(
+            adata, genes, layer_key_np_test, dense=True, cells=cells
+        )
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
 
         # Prepare counts_1 and counts_2
         counts_1 = []
@@ -503,10 +509,12 @@ def run_ct_cell_communication_analysis(
             adata.uns["ct_ccc_results"]["np"]["m"]["cs"] = cs_m.detach().cpu().numpy()
 
         perm_cs_gp = torch.zeros(
-            (len(cell_type_pairs), counts_1.shape[0], M), dtype=torch.float64, device=device
+            (len(cell_type_pairs), counts_1.shape[0], M), dtype=stats_dtype(device), device=device
         )
         perm_cs_m = torch.zeros(
-            (len(cell_type_pairs), len(gene_pair_dict), M), dtype=torch.float64, device=device
+            (len(cell_type_pairs), len(gene_pair_dict), M),
+            dtype=stats_dtype(device),
+            device=device,
         )
 
         if check_analytic_null:
@@ -571,11 +579,11 @@ def run_ct_cell_communication_analysis(
                 )
                 gp_zs_perm_array[:, :, i] = Z_gp_perm
                 gp_pvals_perm_array[:, :, i] = torch.tensor(
-                    norm.sf(Z_gp_perm.cpu().numpy()), device=device
+                    norm.sf(Z_gp_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                 )
                 m_zs_perm_array[:, :, i] = Z_m_perm
                 m_pvals_perm_array[:, :, i] = torch.tensor(
-                    norm.sf(Z_m_perm.cpu().numpy()), device=device
+                    norm.sf(Z_m_perm.cpu().numpy()), dtype=stats_dtype(device), device=device
                 )
 
         adata.uns["ct_ccc_results"]["np"]["gp"]["perm_cs"] = perm_cs_gp.detach().cpu().numpy()
@@ -650,7 +658,7 @@ def create_weights_ct_pairs(
 ) -> torch.Tensor:
     """Create sparse weight tensors for each cell type pair."""
     indices = torch.tensor([weights.row, weights.col], dtype=torch.long, device=device)
-    values = torch.tensor(weights.data, dtype=torch.float64, device=device)
+    values = torch.tensor(weights.data, dtype=stats_dtype(device), device=device)
     shape = weights.shape
 
     cell_type_cats = cell_types.astype("category")
@@ -732,6 +740,7 @@ def compute_ct_interacting_cell_scores(
         Print detailed progress messages.
     """
     start = time.time()
+    device = resolve_device(device)
     if verbose:
         print("Computing cell type-aware gene pair and metabolite scores...")
 
@@ -755,12 +764,11 @@ def compute_ct_interacting_cell_scores(
 
     layer_key_p_test = adata.uns.get("layer_key_p_test", None)
     layer_key_np_test = adata.uns.get("layer_key_np_test", None)
-    use_raw = (layer_key_p_test == "use_raw") and (layer_key_np_test == "use_raw")
 
-    obs = adata.raw.obs if use_raw else adata.obs
-    cells = (
-        adata.raw.obs.index.values.astype(str) if use_raw else adata.obs_names.values.astype(str)
-    )
+    # Cell metadata/obs_names never differ between `adata` and `adata.raw`,
+    # and `Raw` has no `.obs` attribute to read them from regardless.
+    obs = adata.obs
+    cells = adata.obs_names.values.astype(str)
 
     gene_pairs = adata.uns.get("gene_pairs", None)
     gene_pairs_per_ct_pair = adata.uns.get("gene_pairs_per_ct_pair", None)
@@ -942,8 +950,10 @@ def compute_ct_interacting_cell_scores(
         adata.uns["ct_interacting_cell_results"]["p"] = {"gp": {}, "m": {}}
 
         # Load counts
-        counts = counts_from_anndata(adata[cells, genes], layer_key_p_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = counts_from_anndata_for_genes(
+            adata, genes, layer_key_p_test, dense=True, cells=cells
+        )
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
 
         # Prepare counts_1 and counts_2
@@ -1050,8 +1060,10 @@ def compute_ct_interacting_cell_scores(
         adata.uns["ct_interacting_cell_results"]["np"] = {"gp": {}, "m": {}}
 
         # Load counts
-        counts = counts_from_anndata(adata[cells, genes], layer_key_np_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = counts_from_anndata_for_genes(
+            adata, genes, layer_key_np_test, dense=True, cells=cells
+        )
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
 
         # Prepare counts_1 and counts_2
         counts_1 = []
@@ -1196,7 +1208,7 @@ def compute_ct_p_results(
     )
     if not isinstance(EG2_m, torch.Tensor):
         device = EG2_gp.device
-        EG2_m = torch.tensor(EG2_m, device=device, dtype=torch.float64)
+        EG2_m = torch.tensor(EG2_m, device=device, dtype=stats_dtype(device))
 
     stdG_m = torch.sqrt(EG2_m)
     stdG_m[stdG_m == 0] = 1
@@ -1227,7 +1239,7 @@ def get_ct_cell_communication_results(
     sample_specific = "sample_key" in adata.uns
 
     if isinstance(D, np.ndarray):
-        D = torch.tensor(D, dtype=torch.float64, device=device)
+        D = torch.tensor(D, dtype=stats_dtype(device), device=device)
 
     def idx_to_gene(idx):
         return [genes[i] for i in idx] if isinstance(idx, list) else genes[idx]
@@ -1266,8 +1278,8 @@ def get_ct_cell_communication_results(
         cell_com_df_gp["Z_pval"] = p_values.flatten()
         cell_com_df_gp["Z_FDR"] = fdr_values.flatten()
 
-        counts = counts_from_anndata(adata[:, genes], layer_key_p_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = counts_from_anndata_for_genes(adata, genes, layer_key_p_test, dense=True)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         num_umi = counts.sum(dim=0)
         counts_std = standardize_ct_counts(
             adata, counts, model, num_umi, sample_specific, cell_types
@@ -1299,8 +1311,8 @@ def get_ct_cell_communication_results(
         cell_com_df_gp[f"pval_{suffix}"] = p_values.flatten()
         cell_com_df_gp[f"FDR_{suffix}"] = fdr_values.flatten()
 
-        counts = counts_from_anndata(adata[:, genes], layer_key_np_test, dense=True)
-        counts = torch.tensor(counts, dtype=torch.float64, device=device)
+        counts = counts_from_anndata_for_genes(adata, genes, layer_key_np_test, dense=True)
+        counts = torch.tensor(counts, dtype=stats_dtype(device), device=device)
         if adata.uns.get("center_counts_for_np_test", False):
             num_umi = counts.sum(dim=0)
             counts = standardize_ct_counts(
@@ -1384,7 +1396,7 @@ def center_ct_counts_torch(
     """
     # Binarize if using Bernoulli
     if model == "bernoulli":
-        counts = (counts > 0).double()
+        counts = (counts > 0).to(stats_dtype(counts.device))
         mu, var, _ = models.apply_model_per_cell_type(
             models.bernoulli_model_torch, counts, num_umi, cell_types
         )

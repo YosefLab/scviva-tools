@@ -15,7 +15,15 @@ if TYPE_CHECKING:
 
 @dependencies("matplotlib")
 def plot_connectivity_distribution(csr_matrix: csr_matrix) -> None:
-    """Plot a histogram of the number of non-zero entries per row of a sparse matrix."""
+    """Plot a histogram of the number of non-zero entries per row of a sparse matrix.
+
+    Parameters
+    ----------
+    csr_matrix
+        Sparse matrix in CSR format (e.g. a cell-cell connectivity matrix). The number of
+        non-zero entries per row is computed from its ``indptr`` attribute and shown as a
+        density-normalized histogram.
+    """
     import matplotlib.pyplot as plt
     import numpy as np
 

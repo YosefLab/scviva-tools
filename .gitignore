@@ -42,9 +42,16 @@ MANIFEST
 /docs/jupyter_execute/
 /docs/api/reference/
 
+# Pooch dataset download caches (e.g. load_visium_mouse_colon_dataset())
+/data/
+/docs/tutorials/data/
+
+# gseapy/EnrichR default output dir (e.g. destvi_utils.explore_gamma_space())
+/docs/tutorials/test/
+
 # OS
 .DS_Store
 Thumbs.db
-/docs/architecture/
+/docs/architecture/*.html
 /docs/superpowers/
 /.claude/

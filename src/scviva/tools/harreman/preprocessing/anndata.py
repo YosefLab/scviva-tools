@@ -32,6 +32,31 @@ def counts_from_anndata(adata, layer_key=None, dense=False):
     return counts
 
 
+def counts_from_anndata_for_genes(adata, genes, layer_key=None, dense=False, cells=None):
+    """Like :func:`counts_from_anndata`, but restricted to *genes* (and optionally *cells*).
+
+    Equivalent to ``counts_from_anndata(adata[:, genes], layer_key, dense)``
+    (or ``adata[cells, genes]`` when *cells* is given), except also correct
+    when ``layer_key == "use_raw"``: AnnData views apply obs-axis (cell)
+    subsetting to ``.raw`` correctly, but silently ignore var-axis (gene)
+    subsetting on ``.raw`` (only ``.X``/``.layers`` respect it), so
+    ``adata[:, genes].raw.X`` returns the *full*, unsubset raw matrix instead
+    of raising or subsetting. Genes are instead selected by position against
+    ``adata.raw.var_names`` directly.
+    """
+    if layer_key != "use_raw":
+        sub = adata[:, genes] if cells is None else adata[cells, genes]
+        return counts_from_anndata(sub, layer_key=layer_key, dense=dense)
+
+    gene_idx = adata.raw.var_names.get_indexer(pd.Index(genes))
+    if (gene_idx == -1).any():
+        missing = pd.Index(genes)[gene_idx == -1].tolist()
+        raise KeyError(f"Genes not found in adata.raw.var_names: {missing}")
+    sub = adata if cells is None else adata[cells]
+    counts = counts_from_anndata(sub, layer_key=layer_key, dense=dense)  # (n_raw_genes, n_cells)
+    return counts[gene_idx]
+
+
 def setup_anndata(
     input_adata: anndata.AnnData,
     cell_types: list,
@@ -460,7 +485,12 @@ def recover_uns_harreman(adata):
             "version",
         ]
         mod_columns = [col.replace(".", "_") for col in original_columns]
-        adata.uns["LR_database"][mod_columns].columns = original_columns
+        # `df[cols].columns = ...` renames the columns of the temporary object
+        # returned by `__getitem__`, not `df` itself — it's a silent no-op.
+        # `.rename` mutates (via reassignment) the actual stored DataFrame.
+        adata.uns["LR_database"] = adata.uns["LR_database"].rename(
+            columns=dict(zip(mod_columns, original_columns, strict=True))
+        )
 
     if "gene_pairs" in adata.uns:
         gene_pairs_tmp = [tuple(gp.split("_")) for gp in adata.uns["gene_pairs"]]

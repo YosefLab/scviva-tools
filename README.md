@@ -79,6 +79,12 @@ Full documentation, including the user guide, API reference, and tutorials, is u
 [docs/](docs/index.md). See [CHANGELOG.md](CHANGELOG.md) for a detailed history of recent
 changes.
 
+## Citation
+
+If you use scviva-tools in your research, please cite:
+
+> Ori Kronfeld, Nathan Levy, Pierre Boyeau, Oier Exezarreta-Arrastoa, Artemii Bakulin, Elham Azizi, Can Ergen & Nir Yosef
+
 ## References
 
 See [docs/references.md](docs/references.md) for full citations.

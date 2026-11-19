@@ -13,7 +13,7 @@ from numba import njit
 from scipy.stats import mannwhitneyu
 from statsmodels.stats.multitest import multipletests
 
-from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata
+from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata_for_genes
 
 
 def apply_gene_filtering(
@@ -99,7 +99,14 @@ def apply_gene_filtering(
                 raise ValueError('The "cell_type_key" argument needs to be provided.')
 
         filtered_genes, filtered_genes_ct = filter_genes(
-            adata, layer_key, db_key, cell_type_key, expression_filt, de_filt, autocorrelation_filt
+            adata,
+            layer_key,
+            db_key,
+            cell_type_key,
+            expression_filt,
+            de_filt,
+            autocorrelation_filt,
+            threshold=threshold,
         )
         adata.uns["filtered_genes"] = filtered_genes
         adata.uns["filtered_genes_ct"] = filtered_genes_ct
@@ -131,15 +138,20 @@ def perform_feature_elimination(
         Minimum fraction of cells in which the gene must be expressed.
     """
     use_raw = layer_key == "use_raw"
+    store = adata.raw.varm if use_raw else adata.varm
+    var_names = adata.raw.var_names if use_raw else adata.var_names
 
-    metab_matrix = adata.raw.varm[database_varm_key] if use_raw else adata.varm[database_varm_key]
+    metab_matrix = store[database_varm_key]
     genes = metab_matrix.loc[(metab_matrix != 0).any(axis=1)].index
 
-    counts = counts_from_anndata(adata[:, genes], layer_key, dense=True)
+    counts = counts_from_anndata_for_genes(adata, genes, layer_key, dense=True)
 
     valid_genes = genes[filter_expr_matrix(counts, threshold=threshold)]
 
-    adata.varm[database_varm_key][~adata.var_names.isin(valid_genes)] = 0
+    # Write back to the same store the matrix was read from above — writing
+    # to `adata.varm` unconditionally (as before) silently discarded this
+    # filtering step whenever `use_raw=True`.
+    store[database_varm_key][~var_names.isin(valid_genes)] = 0
 
     return
 
@@ -152,6 +164,7 @@ def filter_genes(
     expression_filt: bool,
     de_filt: bool,
     autocorrelation_filt: bool,
+    threshold: float = 0.2,
 ) -> tuple[list[str], dict[Any, list[str]]]:
     """
     Applies expression and/or DE filtering per cell type.
@@ -172,6 +185,9 @@ def filter_genes(
         Whether to filter based on differential expression.
     autocorrelation_filt
         Whether to restrict to spatially autocorrelated genes.
+    threshold
+        Minimum fraction of cells (within each cell type) in which a gene
+        must be expressed to pass ``expression_filt``.
 
     Returns
     -------
@@ -191,7 +207,7 @@ def filter_genes(
         db = adata.raw.varm[database_varm_key] if use_raw else adata.varm[database_varm_key]
         sig_genes = db.loc[(db != 0).any(axis=1)].index
 
-    counts = counts_from_anndata(adata[:, sig_genes], layer_key, dense=True)
+    counts = counts_from_anndata_for_genes(adata, sig_genes, layer_key, dense=True)
 
     cell_types = adata.obs[cell_type_key].values
     unique_cts = np.unique(cell_types)
@@ -202,7 +218,7 @@ def filter_genes(
     not_masks = {ct: np.where(cell_types != ct)[0] for ct in unique_cts}
 
     if expression_filt:
-        expr_mask = {ct: filter_expr_matrix(counts[:, masks[ct]], 0.2) for ct in unique_cts}
+        expr_mask = {ct: filter_expr_matrix(counts[:, masks[ct]], threshold) for ct in unique_cts}
     if de_filt:
         de_stats = {
             ct: de_threshold(counts[:, masks[ct]], counts[:, not_masks[ct]]) for ct in unique_cts
@@ -331,10 +347,16 @@ def compute_gene_pairs(
         if cell_type_key is None:
             raise ValueError('Please provide the "cell_type_key" argument.')
         adata.uns["cell_type_key"] = cell_type_key
-        cell_types = adata.obs[cell_type_key] if not use_raw else adata.raw.obs[cell_type_key]
+        # Cell-type labels live in `adata.obs` regardless of `use_raw`
+        # (`Raw` has no `.obs` attribute to read them from).
+        cell_types = adata.obs[cell_type_key]
         cell_types = cell_types.values.astype(str)
 
-    database = adata.varm["database"]
+    # `database` was extracted into `adata.raw.varm` (not `adata.varm`) when
+    # `use_raw=True` — see extract_interaction_db — so it must be read from
+    # (and, below, written back to) the same store.
+    db_store = adata.raw.varm if use_raw else adata.varm
+    database = db_store["database"]
 
     heterodimer_info = adata.uns.get("heterodimer_info")
     if heterodimer_info is not None:
@@ -373,7 +395,7 @@ def compute_gene_pairs(
         )
     ]
     database = database[cols_keep].copy()
-    adata.varm["database"] = database
+    db_store["database"] = database
 
     if ct_specific and "filtered_genes_ct" not in adata.uns:
         filtered_genes_ct = dict.fromkeys(np.unique(cell_types), filtered_genes)

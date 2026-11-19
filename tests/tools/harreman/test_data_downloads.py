@@ -9,6 +9,9 @@ import scviva.tools.harreman.datasets.datasets as datasets_mod
 import scviva.tools.harreman.hotspot.local_autocorrelation as autocorr_mod
 import scviva.tools.harreman.preprocessing.database as database_mod
 
+# pooch is optional and imported lazily inside the loaders, so patch the module itself.
+pooch = pytest.importorskip("pooch")
+
 BASE_URL = "https://exampledata.scverse.org/scvi-tools/harreman"
 
 DATASET_HASHES = {
@@ -93,14 +96,14 @@ METABOLIC_GENE_HASHES = {
 }
 
 
-def _patch_retrieve(monkeypatch, module):
+def _patch_retrieve(monkeypatch):
     calls = []
 
     def retrieve(**kwargs):
         calls.append(kwargs)
         return f"/tmp/harreman-cache/{kwargs['fname']}"
 
-    monkeypatch.setattr(module.pooch, "retrieve", retrieve)
+    monkeypatch.setattr(pooch, "retrieve", retrieve)
     return calls
 
 
@@ -165,7 +168,7 @@ def _patch_retrieve(monkeypatch, module):
     ],
 )
 def test_dataset_loaders_fetch_from_exampledata_with_hash(monkeypatch, loader, sample, fname):
-    calls = _patch_retrieve(monkeypatch, datasets_mod)
+    calls = _patch_retrieve(monkeypatch)
     read_paths = []
     sentinel = object()
 
@@ -192,8 +195,8 @@ def test_dataset_loaders_fetch_from_exampledata_with_hash(monkeypatch, loader, s
 
 @pytest.mark.parametrize("species", ["human", "mouse"])
 def test_extract_transporter_info_fetches_reachable_files_with_hash(monkeypatch, species):
-    calls = _patch_retrieve(monkeypatch, database_mod)
-    monkeypatch.setattr(database_mod.pooch, "os_cache", lambda name: f"/cache/{name}")
+    calls = _patch_retrieve(monkeypatch)
+    monkeypatch.setattr(pooch, "os_cache", lambda name: f"/cache/{name}")
 
     def read_csv(path, index_col=0):
         if "Heterodimer" in path:
@@ -227,8 +230,8 @@ def test_extract_transporter_info_fetches_reachable_files_with_hash(monkeypatch,
 
 @pytest.mark.parametrize("species", ["human", "mouse"])
 def test_extract_lr_pairs_fetches_v2_cellchat_files_with_hash(monkeypatch, species):
-    calls = _patch_retrieve(monkeypatch, database_mod)
-    monkeypatch.setattr(database_mod.pooch, "os_cache", lambda name: f"/cache/{name}")
+    calls = _patch_retrieve(monkeypatch)
+    monkeypatch.setattr(pooch, "os_cache", lambda name: f"/cache/{name}")
 
     def read_csv(path, index_col=0):
         if "interaction" in path:
@@ -268,8 +271,8 @@ def test_extract_lr_pairs_fetches_v2_cellchat_files_with_hash(monkeypatch, speci
 
 @pytest.mark.parametrize("species", ["human", "mouse"])
 def test_load_metabolic_genes_fetches_from_exampledata_with_hash(monkeypatch, species):
-    calls = _patch_retrieve(monkeypatch, autocorr_mod)
-    monkeypatch.setattr(autocorr_mod.pooch, "os_cache", lambda name: f"/cache/{name}")
+    calls = _patch_retrieve(monkeypatch)
+    monkeypatch.setattr(pooch, "os_cache", lambda name: f"/cache/{name}")
     monkeypatch.setattr(
         autocorr_mod.pd,
         "read_csv",

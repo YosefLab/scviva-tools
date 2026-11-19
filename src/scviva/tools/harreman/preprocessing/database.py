@@ -3,9 +3,10 @@ from itertools import zip_longest
 from re import compile, match
 from typing import Literal
 
+import numpy as np
 import pandas as pd
-import pooch
 from anndata import AnnData
+from scvi.utils import dependencies
 
 from scviva.tools.harreman._data import harreman_data_hash, harreman_data_url
 
@@ -60,14 +61,14 @@ def extract_interaction_db(
     df_list = []
 
     if database in ["LR", "both"]:
-        extract_lr_pairs(adata, species)
+        extract_lr_pairs(adata, species, var_names=index)
         lr_data = build_LR_matrix(
             index, adata.uns["LR_database"], adata.uns["ligand"], adata.uns["receptor"]
         )
         df_list.append(lr_data)
 
     if database in ["transporter", "both"]:
-        metab_dict = extract_transporter_info(adata, species, extracellular_only)
+        metab_dict = extract_transporter_info(adata, species, extracellular_only, var_names=index)
         metab_data = build_transporter_matrix(index, metab_dict)
         df_list.append(metab_data)
 
@@ -75,7 +76,15 @@ def extract_interaction_db(
 
     adata.uns["database_varm_key"] = "database"
     adata.uns["database"] = database
-    adata.varm["database"] = database_df
+    # `database_df` is aligned to `index` above (`adata.raw.var_names` when
+    # `use_raw=True`), which can differ in length from `adata.var_names` (e.g.
+    # when `adata.raw` retains more genes than an HVG-subset `adata.var`) —
+    # `adata.varm` requires exact alignment to `adata.var_names`, so the
+    # raw-aligned matrix must go in `adata.raw.varm` instead.
+    if use_raw:
+        adata.raw.varm["database"] = database_df
+    else:
+        adata.varm["database"] = database_df
 
     if verbose:
         print("Finished extracting interaction database in %.3f seconds" % (time.time() - start))
@@ -87,10 +96,13 @@ def build_LR_matrix(index, database, ligands, receptors):
     """Build a gene-by-ligand-receptor interaction matrix."""
     matrix = pd.DataFrame(0, index=index, columns=database.index)
     matrix.index = matrix.index.str.lower()
+    # Plain-Python set: `Series.isin(<Arrow string index>)` re-converts the whole index on
+    # every call under pandas 3, which made this per-column loop take tens of minutes.
+    index_set = set(matrix.index)
     for col in matrix.columns:
         for _key, df, sign in [("ligand", ligands, 1), ("receptor", receptors, -1)]:
-            genes = df.loc[col].dropna().astype(str).str.lower()
-            genes = genes[genes.isin(matrix.index)]
+            genes = [g.lower() for g in df.loc[col].dropna().astype(str)]
+            genes = [g for g in genes if g in index_set]
             matrix.loc[genes, col] = sign
     matrix.index = index
     return matrix.loc[:, matrix.any()]
@@ -113,6 +125,7 @@ def build_transporter_matrix(index, metab_dict):
     return matrix.loc[:, matrix.any()]
 
 
+@dependencies("pooch")
 def extract_transporter_info(
     adata: AnnData,
     species: Literal["mouse", "human"],
@@ -120,8 +133,23 @@ def extract_transporter_info(
     export_suffix: str = "(_exp|_export)",
     import_suffix: str = "(_imp|_import)",
     verbose: bool = False,
+    var_names: pd.Index | None = None,
 ) -> dict[str, dict[str, list[str]]]:
-    """Read csv file to extract the metabolite database."""
+    """Read csv file to extract the metabolite database.
+
+    Parameters
+    ----------
+    var_names
+        Gene names to test membership against. Defaults to
+        ``adata.var_names``; pass ``adata.raw.var_names`` when the caller is
+        operating in ``use_raw`` mode, so genes present only in
+        ``adata.raw`` aren't silently dropped.
+    """
+    import pooch
+
+    if var_names is None:
+        var_names = adata.var_names
+    var_set = set(var_names)  # see the note in extract_lr_pairs
     cache = pooch.os_cache("scvi_harreman")
 
     filenames = {
@@ -175,8 +203,7 @@ def extract_transporter_info(
         metab_dict.setdefault(
             name, {IMPORT_METAB_KEY: [], EXPORT_METAB_KEY: [], BOTH_METAB_KEY: []}
         )
-        genes_in_var = pd.Series(genes).isin(adata.var_names)
-        metab_dict[name][direction] = pd.Series(genes)[genes_in_var].tolist()
+        metab_dict[name][direction] = [g for g in genes if g in var_set]
 
     adata.uns["metabolite_database"] = df
     adata.uns["heterodimer_info"] = heterodimer_info
@@ -195,8 +222,22 @@ def build_metabolite_df(metab_dict, key):
     return df
 
 
-def extract_lr_pairs(adata, species):
-    """Extracting LR pairs from CellChatDB."""
+@dependencies("pooch")
+def extract_lr_pairs(adata, species, var_names=None):
+    """Extracting LR pairs from CellChatDB.
+
+    Parameters
+    ----------
+    var_names
+        Gene names to test membership against. Defaults to
+        ``adata.var_names``; pass ``adata.raw.var_names`` when the caller is
+        operating in ``use_raw`` mode, so genes present only in
+        ``adata.raw`` aren't silently dropped.
+    """
+    import pooch
+
+    if var_names is None:
+        var_names = adata.var_names
     cache = pooch.os_cache("scvi_harreman")
 
     interaction_fname = f"interaction_input_CellChatDB_v2_{species}.csv"
@@ -225,17 +266,17 @@ def extract_lr_pairs(adata, species):
         interaction.pop("receptor").to_numpy(dtype=object, copy=True),
     )
 
+    # Plain-Python set: `Series.isin(var_names)` re-converts an Arrow-backed var_names index
+    # on every call under pandas 3, which made this loop take tens of minutes.
+    var_set = set(var_names)
     for i in range(len(ligands)):
         for n in [ligands, receptors]:
             l = n[i]
             if l in complex.index:
-                n[i] = (
-                    complex.loc[l]
-                    .dropna()
-                    .values[pd.Series(complex.loc[l].dropna().values).isin(adata.var_names)]
-                )
+                subunits = complex.loc[l].dropna().values
+                n[i] = subunits[[s in var_set for s in subunits]]
             else:
-                n[i] = pd.Series(l).values[pd.Series(l).isin(adata.var_names)]
+                n[i] = np.array([l] if l in var_set else [], dtype=object)
 
     lig_df = pd.DataFrame.from_records(zip_longest(*pd.Series(ligands).values)).transpose()
     rec_df = pd.DataFrame.from_records(zip_longest(*pd.Series(receptors).values)).transpose()

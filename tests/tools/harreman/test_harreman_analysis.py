@@ -629,6 +629,7 @@ def test_integration_scviva_latent_shape(scviva_model_and_adata):
 def test_accessors_exist(adata_spatial):
     ha = HarremanAnalysis(adata_spatial)
     assert hasattr(ha, "hs")
+    assert hasattr(ha, "vs")
     assert hasattr(ha, "tl")
     assert hasattr(ha, "pl")
 

@@ -158,6 +158,21 @@ class DirichletDecoder(Decoder):
         self.concentration_eps = concentration_eps
 
     def forward(self, x: torch.Tensor, *cat_list: int):
+        """Decode the cell type composition distribution.
+
+        Parameters
+        ----------
+        x
+            Tensor with shape ``(..., n_input)``.
+        *cat_list
+            Category membership(s) for each sample, one tensor per categorical covariate.
+
+        Returns
+        -------
+        :class:`~torch.distributions.Dirichlet` distribution over cell type compositions,
+        whose concentration (shape ``(..., n_output)``) is the softplus of the decoder output
+        plus ``concentration_eps``.
+        """
         p = self.decoder(x, *cat_list)
         p_m = self.mean_decoder(p)
 
@@ -181,6 +196,9 @@ class NicheDecoder(nn.Module):
         The dimensionality of the input (latent space)
     n_output
         The dimensionality of the output (data space)
+    n_niche_components
+        Number of niche components (cell types); the output has shape
+        ``(n_niche_components, n_output)`` per sample
     n_cat_list
         A list containing the number of categories
         for each category of interest. Each category will be
@@ -191,7 +209,9 @@ class NicheDecoder(nn.Module):
         The number of nodes per hidden layer
     dropout_rate
         Dropout rate to apply to each of the hidden layers
-    kwargs
+    var_eps
+        Minimum value added to the variance for numerical stability
+    **kwargs
         Keyword args for :class:`~scvi.module._base.FCLayers`
     """
 
@@ -235,7 +255,7 @@ class NicheDecoder(nn.Module):
         ----------
         x
             tensor with shape ``(n_input,)``
-        cat_list
+        *cat_list
             list of category membership(s) for this sample
 
         Returns

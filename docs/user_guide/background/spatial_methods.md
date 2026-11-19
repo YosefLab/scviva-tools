@@ -5,11 +5,11 @@
 Spatial transcriptomics (ST) measures gene expression while preserving the spatial position of
 cells or spots within the tissue. Key platforms include:
 
-| Platform | Resolution | Typical use case |
-|----------|-----------|-----------------|
-| Visium (10x) | Multi-cell spots (~55 µm) | Whole-tissue profiling |
-| Xenium / MERSCOPE | Single-cell resolved | High-plex FISH |
-| Slide-seq | Near single-cell | Broad coverage |
+| Platform          | Resolution                | Typical use case       |
+| ----------------- | ------------------------- | ---------------------- |
+| Visium (10x)      | Multi-cell spots (~55 µm) | Whole-tissue profiling |
+| Xenium / MERSCOPE | Single-cell resolved      | High-plex FISH         |
+| Slide-seq         | Near single-cell          | Broad coverage         |
 
 ## Key challenges
 
@@ -19,7 +19,7 @@ cells or spots within the tissue. Key platforms include:
 
 ## Neighbour graphs
 
-Spatial neighbour graphs encode tissue topology. scVIVA-Tools computes these via
+Spatial neighbour graphs encode tissue topology. scviva-tools computes these via
 `model.compute_neighbors()` using squidpy (CPU) or RAPIDS (GPU). The resulting
 `index_neighbor` and `distance_neighbor` arrays in `adata.obsm` are consumed by ResolVI
 and scVIVA during training.

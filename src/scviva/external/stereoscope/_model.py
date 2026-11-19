@@ -140,9 +140,12 @@ class RNAStereoscope(UnsupervisedTrainingMixin, SpatialBaseModel):
 
         Parameters
         ----------
+        %(param_adata)s
         %(param_labels_key)s
         %(param_layer)s
         %(param_batch_key)s
+        **kwargs
+            Keyword args for :meth:`~scvi.data.AnnDataManager.register_fields`.
         """
         setup_method_args = cls._get_setup_method_args(**locals())
         anndata_fields = [
@@ -351,7 +354,10 @@ class SpatialStereoscope(SpatialDeconvolutionMixin, UnsupervisedTrainingMixin, S
 
         Parameters
         ----------
+        %(param_adata)s
         %(param_layer)s
+        **kwargs
+            Keyword args for :meth:`~scvi.data.AnnDataManager.register_fields`.
         """
         setup_method_args = cls._get_setup_method_args(**locals())
         adata.obs["_indices"] = np.arange(adata.n_obs)

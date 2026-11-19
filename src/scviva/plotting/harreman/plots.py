@@ -8,6 +8,8 @@ import seaborn as sns
 from anndata import AnnData
 from scipy.cluster.hierarchy import leaves_list
 
+from scviva.plotting._utils import prettify_axis
+
 
 def local_correlation_plot(
     adata: AnnData,
@@ -183,7 +185,7 @@ def average_local_correlation_plot(
     )
 
     avg_local_correlation_z = (
-        avg_local_correlation_z.groupby(level=1).mean().groupby(level=0, axis=1).mean()
+        avg_local_correlation_z.groupby(level=1).mean().T.groupby(level=0).mean().T
     )
     avg_local_correlation_z = avg_local_correlation_z.loc[
         avg_local_correlation_z.index != -1, avg_local_correlation_z.columns != -1
@@ -801,7 +803,7 @@ def plot_interaction(
 
     ax = plt.subplot(111)
     ax.set_aspect("equal", adjustable="box")
-    _prettify_axis(ax, spatial=True)
+    prettify_axis(ax, spatial=True)
     if swap_y_axis:
         plt.scatter(
             coords[:, 0],
@@ -842,7 +844,7 @@ def plot_ct_interaction(
 
     ax = plt.subplot(111)
     ax.set_aspect("equal", adjustable="box")
-    _prettify_axis(ax, spatial=True)
+    prettify_axis(ax, spatial=True)
     if swap_y_axis:
         plt.scatter(
             coords[:, 0],
@@ -860,138 +862,6 @@ def plot_ct_interaction(
     plt.title(interaction)
     if colorbar:
         plt.colorbar()
-
-
-def _prettify_axis(ax, spatial=False):
-    # Hide the right and top spines
-    ax.spines["right"].set_visible(False)
-    ax.spines["top"].set_visible(False)
-    # Only show ticks on the left and bottom spines
-    ax.yaxis.set_ticks_position("left")
-    ax.xaxis.set_ticks_position("bottom")
-    if spatial:
-        plt.xticks([])
-        plt.yticks([])
-        plt.xlabel("Spatial1")
-        plt.ylabel("Spatial2")
-
-
-def plot_signature_for_selection(
-    adata, signature, coords_obsm_key, s, vmin, vmax, figsize, cmap, colorbar
-):
-    """Plot signature scores on spatial coordinates for selection."""
-    scores = adata.obsm["vision_signatures"]
-
-    if isinstance(adata.obsm[coords_obsm_key], pd.DataFrame):
-        coords = adata.obsm[coords_obsm_key].values
-    else:
-        coords = adata.obsm[coords_obsm_key]
-
-    points = np.column_stack([coords[:, 0], coords[:, 1]])
-
-    plt.figure(figsize=figsize)
-    ax = plt.subplot(111)
-    _prettify_axis(ax, spatial=True)
-    p = plt.scatter(
-        coords[:, 0], coords[:, 1], c=scores[signature], cmap=cmap, s=s, vmin=vmin, vmax=vmax
-    )
-    plt.title(signature)
-    if colorbar:
-        plt.colorbar()
-
-    return p, ax, points
-
-
-def plot_selection_histplot(adata, signature, group):
-    """Plot histogram of signature scores for selection vs remainder."""
-    adata.obs["selected"] = group
-    adata.obs["selected"][adata.obs["selected"] == 1] = "Selection"
-    adata.obs["selected"][adata.obs["selected"] == 0] = "Remainder"
-
-    if signature not in adata.obs:
-        adata.obs[signature] = adata.obsm["vision_signatures"][signature]
-
-    sns.histplot(
-        data=adata.obs,
-        x=signature,
-        hue=adata.obs["selected"].tolist(),
-        bins=30,
-        palette={"Selection": "#FF7F00", "Remainder": "#1F78B4"},
-    )
-    plt.show()
-
-    return
-
-
-def plot_vision_autocorrelation(
-    adata,
-    type: Literal["observations"] | Literal["signatures"] | None = None,
-    center: int | None = 0.5,
-    figsize: tuple | None = (1, 10),
-    cmap: str | None = "coolwarm",
-    cbar: bool | None = True,
-):
-    """Plot vision autocorrelation results."""
-    if type not in ["observations", "signatures"]:
-        raise ValueError('The "type" variable should be one of ["observations", "signatures"].')
-
-    type_str = "vision_obs_df_scores" if type == "observations" else "vision_signature_scores"
-
-    masked_data = adata.uns[type_str][["c_prime"]].where(
-        (adata.uns[type_str][["fdr"]] < 0.05).values
-    )
-    masked_data = masked_data.sort_values("c_prime", ascending=False)
-    masked_data.columns = ["Consistency"]
-
-    plt.figure(figsize=figsize)
-    sns.heatmap(masked_data, annot=masked_data, cmap=cmap, fmt=".2f", cbar=cbar, center=center)
-    plt.show()
-
-    return
-
-
-def plot_vision_de_results(
-    adata,
-    type: Literal["observations"] | Literal["signatures"] | None = None,
-    var: str = None,
-    center: int | None = 0.5,
-    figsize: tuple | None = (3, 10),
-    cmap: str | None = "coolwarm",
-    cbar: bool | None = True,
-):
-    """Plot vision differential expression results."""
-    if var is None:
-        raise ValueError('The "var" variable should be a categorical variable to plot.')
-
-    if type not in ["observations", "signatures"]:
-        raise ValueError('The "type" variable should be one of ["observations", "signatures"].')
-
-    type_score_str = (
-        f"one_vs_all_obs_cols_{var}_scores"
-        if type == "observations"
-        else f"one_vs_all_signatures_{var}_scores"
-    )
-    type_pval_str = (
-        f"one_vs_all_obs_cols_{var}_pvals"
-        if type == "observations"
-        else f"one_vs_all_signatures_{var}_padj"
-    )
-
-    mask = adata.uns[type_pval_str] < 0.05
-
-    plt.figure(figsize=figsize)
-    sns.heatmap(
-        adata.uns[type_score_str],
-        mask=~mask,
-        cmap=cmap,
-        annot=mask.applymap(lambda x: "*" if x else ""),
-        fmt="",
-        cbar=cbar,
-        center=center,
-    )
-    plt.show()
-
-    return
 
 
 def plot_sig_mod_correlation(
@@ -1024,7 +894,7 @@ def plot_sig_mod_correlation(
 
     if coef is None or padj is None:
         raise ValueError(
-            'Run the "harreman.hs.integrate_vision_hotspot_results" function '
+            'Run the "harreman.vs.integrate_vision_hotspot_results" function '
             "before plotting the results."
         )
 
@@ -1122,7 +992,7 @@ def plot_sig_mod_enrichment(
 
     if coef is None or padj is None:
         raise ValueError(
-            'Run the "harreman.hs.integrate_vision_hotspot_results" function '
+            'Run the "harreman.vs.integrate_vision_hotspot_results" function '
             "before plotting the results."
         )
 
@@ -1180,7 +1050,46 @@ def plot_interaction_module_correlation(
     figsize: tuple | None = (10, 10),
     threshold: float | None = None,
 ):
-    """Plot interaction-module correlation heatmap."""
+    """Plot interaction-module correlation heatmap.
+
+    Draws a clustered heatmap of correlation coefficients between interactions (rows) and
+    modules (columns). Only interactions with at least one significant correlation
+    (adjusted p-value or p-value < 0.05) are kept, non-significant entries are masked,
+    and significant entries are annotated with ``*`` (< 0.05), ``**`` (< 0.005) or
+    ``***`` (< 0.0005).
+
+    Parameters
+    ----------
+    adata : AnnData
+        AnnData object containing (as produced by
+        ``harreman.tl.compute_interaction_module_correlation``):
+
+        - ``uns['interaction_module_correlation_coefs']``: DataFrame of correlation
+          coefficients (modules x interactions)
+        - ``uns['interaction_module_correlation_FDR']`` or
+          ``uns['interaction_module_correlation_pvals']``: matching DataFrame of
+          adjusted p-values or p-values
+        - ``uns['cor_method']``: correlation method, used to label the colorbar
+          (``"Spearman R"`` if ``"spearman"``, else ``"Pearson R"``)
+    x_rotation : int, default 0
+        Rotation (in degrees) of the x-axis (module) tick labels.
+    y_rotation : int, default 0
+        Rotation (in degrees) of the y-axis (interaction) tick labels.
+    use_FDR : bool, default True
+        If True, use ``uns['interaction_module_correlation_FDR']`` for significance;
+        otherwise use ``uns['interaction_module_correlation_pvals']``.
+    subset_interactions : list, optional
+        Interactions (rows) to restrict the plot to. If None, all interactions are used.
+    subset_modules : list, optional
+        Modules (columns) to restrict the plot to. If None, all modules are used.
+    cmap : str, default "RdBu_r"
+        Colormap for the heatmap.
+    figsize : tuple, default (10, 10)
+        Figure size passed to :func:`seaborn.clustermap`.
+    threshold : float, optional
+        If set, keep only interactions with a significant coefficient greater than
+        ``threshold`` for at least one module.
+    """
     coef = (
         adata.uns["interaction_module_correlation_coefs"].T
         if "interaction_module_correlation_coefs" in adata.uns.keys()

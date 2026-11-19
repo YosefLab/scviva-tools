@@ -43,12 +43,22 @@ def _train_scvi(adata, seed=SEED, **model_kwargs):
     return model
 
 
+def _reuse_neighbors(adata) -> bool:
+    """Whether scviva should reuse the neighbors scvi already stored in ``adata.obsm``.
+
+    The models are compared on identical neighbors. Their ``_prepare_data`` deliberately
+    differ: scvi-tools (<= 1.5.2) squares the sparse distance matrix with ``**``, a matrix
+    power, while scviva squares it element-wise (covered in ``tests/model/test_resolvi.py``).
+    """
+    return "index_neighbor" in adata.obsm
+
+
 def _train_scviva(adata, seed=SEED, **model_kwargs):
-    """Train scviva.ResolVI with a fixed seed."""
+    """Train scviva.ResolVI with a fixed seed, on the neighbors scvi computed if present."""
     scvi_pkg.settings.seed = seed
     torch.manual_seed(seed)
     np.random.seed(seed)
-    SpatialResolVI.setup_anndata(adata)
+    SpatialResolVI.setup_anndata(adata, prepare_data=not _reuse_neighbors(adata))
     model = SpatialResolVI(adata, **model_kwargs)
     model.train(max_epochs=N_EPOCHS, lr=1e-3)
     return model
@@ -172,7 +182,9 @@ def test_resolvi_size_factor_matches(adata):
     scvi_pkg.settings.seed = SEED
     torch.manual_seed(SEED)
     np.random.seed(SEED)
-    SpatialResolVI.setup_anndata(adata, size_factor_key="cell_area")
+    SpatialResolVI.setup_anndata(
+        adata, size_factor_key="cell_area", prepare_data=not _reuse_neighbors(adata)
+    )
     spatial_model = SpatialResolVI(adata, size_scaling=True)
     spatial_model.train(max_epochs=N_EPOCHS)
 
