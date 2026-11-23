@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [scvi-tools#4091](https://github.com/scverse/scvi-tools/pull/4091). The Colab launch button on
   tutorial pages, the download and full screen buttons, and the tutorial filters are kept, and
   `[source]` links now point to GitHub instead of highlighted copies of the code.
+- `hotspot`'s `compute_local_autocorrelation` now uses blocks to save GPU memory
 
 ### Fixed
 
