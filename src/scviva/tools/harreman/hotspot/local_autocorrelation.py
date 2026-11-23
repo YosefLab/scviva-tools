@@ -1,8 +1,10 @@
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 import torch
 from anndata import AnnData
 from numba import njit
@@ -19,6 +21,12 @@ from scviva.utils import resolve_device, stats_dtype
 from . import models
 
 METABOLIC_GENES_DIR = "metabolic_genes"
+
+# CPU gene blocks are sized so each (genes x cells) dense block holds ~this many values
+_BLOCK_ELEMS = 2**22
+# GPU blocks run sequentially and are not block-parallel, so a bigger size is desirable
+# TODO: Depend on GPU memory for this number?
+_GPU_BLOCK_ELEMS = 2**27
 
 
 @dependencies("pooch")
@@ -148,7 +156,10 @@ def compute_local_autocorrelation(
         genes = pd.Index(genes)
 
     # Load counts
-    counts = counts_from_anndata_for_genes(adata, genes, layer_key, dense=True)
+    counts = counts_from_anndata_for_genes(adata, genes, layer_key)
+
+    def _all_zero(m):
+        return np.asarray((m != 0).sum(axis=1)).ravel() == 0
 
     # Gene filtering
     if sample_specific:
@@ -157,51 +168,65 @@ def compute_local_autocorrelation(
         mask = np.zeros(counts.shape[0], dtype=bool)
         for sample in np.unique(sample_arr):
             sample_idx = np.where(sample_arr == sample)[0]
-            mask |= np.all(counts[:, sample_idx] == 0, axis=1)
+            mask |= _all_zero(counts[:, sample_idx])
     else:
-        mask = np.all(counts == 0, axis=1)
+        mask = _all_zero(counts)
 
     counts = counts[~mask]
     genes = genes[~mask]
 
     # UMI counts
     num_umi = (
-        counts.sum(axis=0)
+        np.asarray(counts.sum(axis=0)).ravel()
         if umi_counts_obs_key is None
         else np.asarray(adata.obs[umi_counts_obs_key])
     )
     adata.uns["umi_counts"] = num_umi
 
-    # Convert to tensors
     dtype = stats_dtype(device)
     num_umi = torch.tensor(adata.uns["umi_counts"], dtype=dtype, device=device)
-    counts = torch.tensor(counts, dtype=dtype, device=device)
-
-    # Center values
-    counts = standardize_counts(adata, counts, model, num_umi, sample_specific)
 
     adata.var["local_autocorrelation"] = False
     adata.var.loc[genes, "local_autocorrelation"] = True
 
     # Compute weights
-    weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
+    weights = make_weights_non_redundant(adata.obsp["weights"]).tocsr()
     Wtot2 = torch.tensor((weights.data**2).sum(), dtype=dtype, device=device)
-    weights = torch.sparse_coo_tensor(
-        torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=dtype, device=device),
-        torch.Size(weights.shape),
+    D = torch.tensor(
+        np.asarray(weights.sum(axis=1)).ravel() + np.asarray(weights.sum(axis=0)).ravel(),
+        dtype=dtype,
         device=device,
     )
+    weights = _to_torch_csr(weights, dtype, device)
 
-    # Compute node degree
-    row_degrees = torch.sparse.sum(weights, dim=1).to_dense()
-    col_degrees = torch.sparse.sum(weights, dim=0).to_dense()
-    D = row_degrees + col_degrees
+    def _block_auto_correlation(start):
+        x = counts[start : start + block]
+        x = torch.tensor(x.toarray() if sp.issparse(x) else x, dtype=dtype, device=device)
+        x = standardize_counts(adata, x, model, num_umi, sample_specific)
+        WXt = weights @ x.T
+        G = (x.T * WXt).sum(dim=0)
+        G_max = 0.5 * torch.sum((x**2) * D[None, :], dim=1)
+        return (x if permutation_test else None), G, G_max
 
-    # Autocorrelation
-    WXt = torch.sparse.mm(weights, counts.T)
-    G = (counts.T * WXt).sum(dim=0)
-    G_max = 0.5 * torch.sum((counts**2) * D[None, :], dim=1)
+    n_genes, n_cells = counts.shape
+    elems = _BLOCK_ELEMS if device.type == "cpu" else _GPU_BLOCK_ELEMS
+    starts = range(0, n_genes, max(1, elems // n_cells))
+    block = starts.step
+    if device.type == "cpu":
+        # One block per thread
+        n_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        try:
+            with ThreadPoolExecutor(n_threads) as pool:
+                out = list(pool.map(_block_auto_correlation, starts))
+        finally:
+            torch.set_num_threads(n_threads)
+    else:
+        out = [_block_auto_correlation(s) for s in starts]
+
+    counts = torch.cat([o[0] for o in out]) if permutation_test else None
+    G = torch.cat([o[1] for o in out])
+    G_max = torch.cat([o[2] for o in out])
 
     # Results
     results = compute_gene_autocorrelation_results(
@@ -311,6 +336,16 @@ def compute_gene_autocorrelation_results(
             return results, ac_zs_perm_array.cpu().numpy(), ac_pvals_perm_array.cpu().numpy()
 
     return results
+
+
+def _to_torch_csr(W, dtype, device):
+    return torch.sparse_csr_tensor(
+        torch.tensor(W.indptr, dtype=torch.long, device=device),
+        torch.tensor(W.indices, dtype=torch.long, device=device),
+        torch.tensor(W.data, dtype=dtype, device=device),
+        size=W.shape,
+        device=device,
+    )
 
 
 @njit
