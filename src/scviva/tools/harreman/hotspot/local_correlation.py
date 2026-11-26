@@ -12,7 +12,7 @@ from scviva.tools.harreman.preprocessing.anndata import counts_from_anndata_for_
 from scviva.tools.harreman.tools.knn import make_weights_non_redundant
 from scviva.utils import resolve_device, stats_dtype
 
-from .local_autocorrelation import standardize_counts
+from .local_autocorrelation import _to_torch_csr, standardize_counts
 
 
 def compute_local_correlation(
@@ -93,23 +93,19 @@ def compute_local_correlation(
     counts = standardize_counts(adata, counts, model, num_umi, sample_specific)
 
     # Compute weights
-    weights = make_weights_non_redundant(adata.obsp["weights"]).tocoo()
-    weights = torch.sparse_coo_tensor(
-        torch.tensor(np.vstack((weights.row, weights.col)), dtype=torch.long, device=device),
-        torch.tensor(weights.data, dtype=dtype, device=device),
-        torch.Size(weights.shape),
+    weights = make_weights_non_redundant(adata.obsp["weights"]).tocsr()
+    D = torch.tensor(
+        np.asarray(weights.sum(axis=1)).ravel() + np.asarray(weights.sum(axis=0)).ravel(),
+        dtype=dtype,
         device=device,
     )
+    weights_t = _to_torch_csr(weights.T.tocsr(), dtype, device)
+    weights = _to_torch_csr(weights, dtype, device)
 
-    # Compute node degree
-    row_degrees = torch.sparse.sum(weights, dim=1).to_dense()
-    col_degrees = torch.sparse.sum(weights, dim=0).to_dense()
-    D = row_degrees + col_degrees
-
-    # Pairwise correlation
-    WXt = torch.sparse.mm(weights, counts.T)  # (cells x genes)
-    WtXt = torch.sparse.mm(weights.transpose(0, 1), counts.T)  # (cells x genes)
-    lcs = torch.matmul(counts, WXt) + torch.matmul(counts, WtXt)
+    WXt = weights @ counts.T  # (cells x genes)
+    WtXt = weights_t @ counts.T  # (cells x genes)
+    lcs = torch.matmul(counts, WXt)
+    lcs = lcs + lcs.T
 
     # Compute second moments of H
     eg2s = (WXt + WtXt).pow(2).sum(dim=0)
@@ -118,6 +114,7 @@ def compute_local_correlation(
     results = compute_pairwise_correlation_results(
         counts=counts,
         weights=weights,
+        weights_t=weights_t,
         lcs=lcs,
         eg2s=eg2s,
         genes=genes,
@@ -148,7 +145,18 @@ def compute_local_correlation(
 
 
 def compute_pairwise_correlation_results(
-    counts, weights, lcs, eg2s, genes, D, M, permutation_test, seed, check_analytic_null, device
+    counts,
+    weights,
+    weights_t,
+    lcs,
+    eg2s,
+    genes,
+    D,
+    M,
+    permutation_test,
+    seed,
+    check_analytic_null,
+    device,
 ):
     """Compute pairwise local correlation results dict with Z-scores, p-values, and FDR."""
     results = {}
@@ -172,7 +180,7 @@ def compute_pairwise_correlation_results(
             idx = torch.randperm(n_cells, device=device)
 
             WXt_perm = torch.sparse.mm(weights, counts[:, idx].T)
-            WtXt_perm = torch.sparse.mm(weights.transpose(0, 1), counts[:, idx].T)
+            WtXt_perm = torch.sparse.mm(weights_t, counts[:, idx].T)
             lcs_perm = torch.matmul(counts, WXt_perm) + torch.matmul(counts, WtXt_perm)
 
             perm_array[:, :, i] = lcs_perm.half()
