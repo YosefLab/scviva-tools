@@ -140,3 +140,21 @@ def test_destvi_qz_prior_follows_module():
     module.double()
     assert module.qz_prior.mean.dtype == torch.float64
     assert module.qz_prior.sample([2]).dtype == torch.float64
+
+
+def test_destvi_from_rna_model_gene_mismatch(destvi_data):
+    """A gene mismatch with the reference raises a clear error, also when the counts agree."""
+    sc_adata, st_adata = destvi_data
+    CondSCVI.setup_anndata(sc_adata, layer="counts", labels_key="labels")
+    sc_model = CondSCVI(sc_adata, weight_obs=False)
+    sc_model.train(max_epochs=1)
+
+    st_subset = st_adata[:, st_adata.var_names[:30]].copy()
+    DestVI.setup_anndata(st_subset, layer="counts")
+    with pytest.raises(ValueError, match="same genes, in the same order"):
+        DestVI.from_rna_model(st_subset, sc_model)
+
+    st_reordered = st_adata[:, st_adata.var_names[::-1]].copy()
+    DestVI.setup_anndata(st_reordered, layer="counts")
+    with pytest.raises(ValueError, match="different order"):
+        DestVI.from_rna_model(st_reordered, sc_model)

@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pytest
 from scvi.data import synthetic_iid
@@ -126,18 +128,17 @@ def test_resolvi_prepare_data_matches_spatial_knn(batch_key):
     Regression test: the scanpy distance graph used to be squared with ``**``, which on a
     sparse matrix is the matrix power (neighbors of neighbors), not element-wise.
 
-    ``_prepare_data`` uses rapids_singlecell when it can be imported. Its graph lists each
-    cell as its own first neighbor (distance 0) and has float32 distances, while scanpy's
-    graph has no self-edges. The checks below follow whichever backend ran.
+    ``_prepare_data`` uses rapids_singlecell when it can be imported; its distances are
+    float32, hence the looser tolerance. Neither backend may return a cell as its own neighbor.
     """
     from sklearn.neighbors import NearestNeighbors
 
     try:
         import rapids_singlecell  # noqa: F401
 
-        use_rapids = True
+        atol = 1e-6
     except ImportError:
-        use_rapids = False
+        atol = 1e-7
 
     k = 10
     adata = synthetic_iid()
@@ -156,15 +157,8 @@ def test_resolvi_prepare_data_matches_spatial_knn(batch_key):
         ind = adata.obsm["index_neighbor"][idx]
         dist = adata.obsm["distance_neighbor"][idx]
         assert np.isin(ind, idx).all()  # neighbors stay within the batch
-        if use_rapids:
-            # rapids: first neighbor is the cell itself at distance 0, then k - 1 others
-            np.testing.assert_array_equal(ind[:, 0], idx)
-            np.testing.assert_array_equal(dist[:, 0], 0)
-            ind, dist = ind[:, 1:], dist[:, 1:]
-            n_true, atol = k - 1, 1e-6  # float32 distances
-        else:
-            n_true, atol = k, 1e-7
-        assert (ind != idx[:, None]).all()  # no other self-neighbors
+        n_true = k
+        assert (ind != idx[:, None]).all()  # a cell is never its own neighbor
 
         true_sq = ((coords[ind] - coords[idx][:, None, :]) ** 2).sum(-1)
         np.testing.assert_allclose(dist, true_sq, rtol=1e-4, atol=atol)
@@ -173,6 +167,46 @@ def test_resolvi_prepare_data_matches_spatial_knn(batch_key):
         knn_dist, _ = NearestNeighbors(n_neighbors=k + 1).fit(coords[idx]).kneighbors()
         kth_sq = knn_dist[:, n_true - 1] ** 2
         assert (true_sq <= kth_sq[:, None] * (1 + 1e-6) + atol).all()
+
+
+def test_resolvi_prepare_data_drops_self_neighbors(monkeypatch):
+    """A neighbor graph that stores each cell's zero distance to itself gives no self-neighbors.
+
+    scanpy stores these entries when it uses its approximate search (more than a few thousand
+    cells), and rapids_singlecell always does. They used to take the first neighbor slot.
+    """
+    import scanpy
+    from scipy.sparse import csr_array, eye
+    from sklearn.neighbors import NearestNeighbors
+
+    monkeypatch.setitem(sys.modules, "rapids_singlecell", None)  # force the scanpy path
+    original = scanpy.pp.neighbors
+
+    def neighbors_with_self(adata, **kwargs):
+        original(adata, **kwargs)
+        dist = adata.obsp["distances"].tocoo()
+        diag = eye(adata.n_obs, format="coo")
+        adata.obsp["distances"] = csr_array(
+            (
+                np.concatenate([np.zeros(adata.n_obs), dist.data]),  # explicit zero diagonal
+                (np.concatenate([diag.row, dist.row]), np.concatenate([diag.col, dist.col])),
+            ),
+            shape=dist.shape,
+        )
+
+    monkeypatch.setattr(scanpy.pp, "neighbors", neighbors_with_self)
+
+    k = 10
+    adata = synthetic_iid()
+    coords = np.random.default_rng(0).random((adata.n_obs, 2))
+    adata.obsm["X_spatial"] = coords.copy()
+    ResolVI.setup_anndata(adata, prepare_data=True, prepare_data_kwargs={"n_neighbors": k})
+
+    ind = adata.obsm["index_neighbor"]
+    assert (ind != np.arange(adata.n_obs)[:, None]).all()
+    assert (adata.obsm["distance_neighbor"] > 0).all()
+    _, true_ind = NearestNeighbors(n_neighbors=k).fit(coords).kneighbors()
+    np.testing.assert_array_equal(np.sort(ind, axis=1), np.sort(true_ind, axis=1))
 
 
 def test_resolvi_prepare_data_recomputes_legacy_cache():
@@ -199,4 +233,4 @@ def test_resolvi_prepare_data_recomputes_legacy_cache():
     ResolVI.setup_anndata(adata, prepare_data=True, prepare_data_kwargs={"n_neighbors": k})
     np.testing.assert_array_equal(adata.obsm["index_neighbor"], expected_index)
     np.testing.assert_allclose(adata.obsm["distance_neighbor"], expected_distance)
-    assert adata.uns["_resolvi_prepare_data_config"]["neighbor_algorithm_version"] == 2
+    assert adata.uns["_resolvi_prepare_data_config"]["neighbor_algorithm_version"] == 3

@@ -19,6 +19,7 @@ from scvi.utils._docstrings import devices_dsp
 from scviva.external.stereoscope._module import RNADeconv, SpatialDeconv
 from scviva.model.base._deconvolution_mixin import SpatialDeconvolutionMixin
 from scviva.model.base._spatial_base import SpatialBaseModel
+from scviva.utils._genes import match_reference_genes
 
 if TYPE_CHECKING:
     from typing import Literal
@@ -233,7 +234,10 @@ class SpatialStereoscope(SpatialDeconvolutionMixin, UnsupervisedTrainingMixin, S
         Parameters
         ----------
         st_adata
-            Registered spatial AnnData.
+            Registered spatial AnnData. Its genes may be a subset of the genes ``sc_model`` was
+            trained on, in any order; the gene-specific parameters of the reference are matched
+            by gene name. A :class:`ValueError` is raised if it has genes absent from the
+            reference.
         sc_model
             Trained :class:`~scviva.external.RNAStereoscope` model.
         prior_weight
@@ -241,9 +245,24 @@ class SpatialStereoscope(SpatialDeconvolutionMixin, UnsupervisedTrainingMixin, S
         **model_kwargs
             Keyword args for :class:`~scviva.external.stereoscope.SpatialDeconv`.
         """
+        sc_params = sc_model.module.get_params()
+        positions = match_reference_genes(
+            st_adata.var_names,
+            sc_model.adata.var_names,
+            model_name="SpatialStereoscope",
+            allow_subset=True,
+        )
+        if positions is not None:
+            # gene-specific parameters are independent across genes, so they can be
+            # restricted and reordered to the genes of the spatial data
+            logger.info(
+                f"Using the {len(positions)} genes of the spatial data out of the "
+                f"{sc_model.adata.n_vars} genes of the reference model."
+            )
+            sc_params = tuple(param[positions] for param in sc_params)
         return cls(
             st_adata,
-            sc_model.module.get_params(),
+            sc_params,
             sc_model.adata_manager.get_state_registry(
                 REGISTRY_KEYS.LABELS_KEY
             ).categorical_mapping,

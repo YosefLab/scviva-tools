@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Bump when ``_prepare_data`` changes the neighbors it computes, so that neighbors cached in
 # ``adata.uns["_resolvi_prepare_data_config"]`` by an older version are recomputed.
-_PREPARE_DATA_VERSION = 2
+_PREPARE_DATA_VERSION = 3
 
 
 class ResolVI(
@@ -724,6 +724,7 @@ class ResolVI(
             batch_key = slice_key
         try:
             import scanpy
+            from scipy.sparse import csr_matrix
             from sklearn.neighbors import sort_graph_by_row_values
             from sklearn.neighbors._base import _kneighbors_from_graph
         except ImportError as err:
@@ -754,7 +755,17 @@ class ResolVI(
             # Square element-wise (``**`` on a sparse matrix is the matrix power D @ D),
             # then sort each row by distance: ``_kneighbors_from_graph`` keeps the first
             # ``n_neighbors`` stored entries per row.
-            distances = sub_data.obsp["distances"].power(2)
+            distances = sub_data.obsp["distances"].power(2).tocoo()
+            # Drop each cell's entry for itself. For large data the approximate search stores
+            # it as an explicit zero, which would be kept as the nearest "neighbor" below.
+            not_self = distances.row != distances.col
+            distances = csr_matrix(
+                (
+                    distances.data[not_self],
+                    (distances.row[not_self], distances.col[not_self]),
+                ),
+                shape=distances.shape,
+            )
             distances = sort_graph_by_row_values(distances, warn_when_not_sorted=False)
 
             distance_neighbor[index, :], index_neighbor_batch = _kneighbors_from_graph(

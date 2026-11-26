@@ -18,13 +18,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `SpatialStereoscope.from_rna_model` accepts spatial data whose genes are a subset of the genes
+  of the reference `RNAStereoscope` model, in any order: the gene-specific parameters of the
+  reference are matched by gene name. Before, the parameters were used as they were, so a subset
+  failed in `train()` with a broadcasting error and reordered genes were silently mismatched.
+  Genes absent from the reference now raise a `ValueError` that says how many genes are shared.
+  This makes pretrained scvi-hub references usable on spatial data that lacks some of their genes.
+- `DestVI.from_rna_model` checks that the spatial data has the same genes, in the same order, as
+  the reference `CondSCVI` model and raises a `ValueError` with the gene counts and the fix.
+  Before, only the number of genes was compared, so different or reordered genes with the same
+  count were silently mismatched. A subset is not accepted, because the CondSCVI decoder
+  normalizes expression over all of its genes.
 - `ResolVI.setup_anndata(..., prepare_data=True)` now stores each cell's true k nearest spatial
   neighbors in `obsm["index_neighbor"]`, with squared Euclidean distances in
   `obsm["distance_neighbor"]`. Before, the scanpy distance graph was squared with `**`, which on
   a sparse matrix is the matrix power, so cells got neighbors of neighbors (almost no overlap
   with the true spatial kNN). Neighbors cached in an AnnData by an older release are recomputed
   on the next `setup_anndata` call. resolVI models trained with `prepare_data=True` should be
-  retrained. Reported by Giacomo Cinnirella.
+  retrained.
+- `ResolVI.setup_anndata(..., prepare_data=True)` no longer stores a cell as its own spatial
+  neighbor. With more than a few thousand cells (scanpy's approximate search), or with
+  rapids-singlecell, the neighbor graph holds each cell's zero distance to itself, so the cell
+  took the first of its `n_neighbors` slots and the farthest true neighbor was dropped. On a
+  117,000-cell Xenium section this raised the mean inferred diffusion proportion from 0.04 to
+  0.38. Cached neighbors are recomputed on the next `setup_anndata` call, and resolVI models
+  trained on such data with `prepare_data=True` should be retrained.
 - `pip install "scviva-tools[all]"` works on macOS and Windows again. The RAPIDS packages in the
   `rapids`, `rapids-cuda12` and `rapids-cuda13` extras (cuML, cuGraph, cuPy, rapids-singlecell)
   are now installed only on Linux, the only platform RAPIDS supports. Before, `[all]` pulled in

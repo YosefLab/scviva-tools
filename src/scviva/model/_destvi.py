@@ -20,6 +20,7 @@ from scvi.utils._docstrings import devices_dsp
 
 from scviva.model.base import SpatialBaseModel, SpatialDeconvolutionMixin
 from scviva.module._mrdeconv import MRDeconv
+from scviva.utils._genes import match_reference_genes
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -138,7 +139,8 @@ class DestVI(
         Parameters
         ----------
         st_adata
-            registered anndata object
+            registered anndata object. It must have the same genes, in the same order, as the
+            data ``sc_model`` was trained on; a :class:`ValueError` is raised otherwise.
         sc_model
             trained CondSCVI model
         vamp_prior_p
@@ -151,6 +153,9 @@ class DestVI(
         """
         attr_dict, var_names, load_state_dict, _ = _get_loaded_data(sc_model)
         registry = attr_dict.pop("registry_")
+        match_reference_genes(
+            st_adata.var_names, var_names, model_name="DestVI", allow_subset=False
+        )
 
         decoder_state_dict = OrderedDict(
             (i[8:], load_state_dict[i]) for i in load_state_dict if i.split(".")[0] == "decoder"
