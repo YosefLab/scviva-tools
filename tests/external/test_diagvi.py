@@ -1841,3 +1841,313 @@ def test_predict_celltype_no_classifier_error(trained_model):
     # This model was trained without labels_key, so no classifier exists
     with pytest.raises(ValueError, match="No classifier was trained"):
         model.predict_celltype(labeled_modality="diss")
+
+
+# =============================================================================
+# Tests for the classification loss options (classification_loss, classifier_logits)
+# =============================================================================
+
+
+def _make_labeled_pair(n_labeled=60, n_unlabeled=20, seed=0):
+    """Fresh labelled seq AnnData (with "unknown" cells) and unlabelled spatial AnnData."""
+    rng = np.random.default_rng(seed)
+    n = n_labeled + n_unlabeled
+    var = pd.DataFrame(index=[f"gene{i}" for i in range(N_VARS)])
+    labels = np.array([f"celltype_{i % 3}" for i in range(n_labeled)] + ["unknown"] * n_unlabeled)
+    adata_diss = AnnData(
+        X=rng.poisson(1.0, size=(n, N_VARS)).astype(np.float32),
+        obs=pd.DataFrame(
+            {
+                "batch": pd.Categorical(rng.choice(["batch1", "batch2"], size=n)),
+                "cell_type": pd.Categorical(labels),
+            }
+        ),
+        var=var,
+    )
+    adata_spatial = AnnData(
+        X=rng.poisson(1.0, size=(N_OBS_SPATIAL, N_VARS)).astype(np.float32),
+        obs={"batch": pd.Categorical(rng.choice(["batch1", "batch2"], size=N_OBS_SPATIAL))},
+        var=var.copy(),
+    )
+    DIAGVI.setup_anndata(adata_diss, batch_key="batch", labels_key="cell_type", likelihood="nb")
+    DIAGVI.setup_anndata(adata_spatial, batch_key="batch", likelihood="nb")
+    return adata_diss, adata_spatial
+
+
+def _classification_loss_on_full_batch(model, adata, mode="diss"):
+    """Run module.loss on all cells of `adata` as one batch; return (loss, inputs)."""
+    from scvi import REGISTRY_KEYS
+
+    model.module.eval()
+    tensors = next(iter(model._make_data_loader(adata, batch_size=adata.n_obs)))
+    inference_outputs = model.module.inference(
+        **model.module._get_inference_input(tensors), mode=mode
+    )
+    generative_outputs = model.module.generative(
+        inference_outputs["z"],
+        inference_outputs["library"],
+        batch_index=tensors[REGISTRY_KEYS.BATCH_KEY],
+        y=tensors[REGISTRY_KEYS.LABELS_KEY],
+        v=inference_outputs["v"],
+        mode=mode,
+    )
+    out = model.module.loss(
+        tensors, inference_outputs, generative_outputs, lam_kl=1.0, lam_data=0.1, mode=mode
+    )
+    return out.extra_metrics["classification_loss"], tensors, inference_outputs
+
+
+def test_classification_loss_default_is_logitnorm_with_logits():
+    """The default classification loss is LogitNorm on logit classifiers (no final softmax)."""
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI({"diss": adata_diss, "spatial": adata_spatial})
+    assert model.module.classification_loss_type == "logitnorm"
+    assert model.module.logitnorm_tau == 0.1
+    assert model.module.classifier_logits is True
+    assert not isinstance(model.module.classifier_0.classifier[-1], torch.nn.Softmax)
+
+
+def test_classification_loss_ce_reproduces_double_softmax():
+    """``classification_loss="ce"`` is the loss of earlier releases: cross_entropy on softmax
+    probabilities, labelled cells only."""
+    from scvi import REGISTRY_KEYS
+
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI({"diss": adata_diss, "spatial": adata_spatial}, classification_loss="ce")
+    assert model.module.classification_loss_type == "ce"
+    assert model.module.classifier_logits is False
+    assert isinstance(model.module.classifier_0.classifier[-1], torch.nn.Softmax)
+
+    loss, tensors, inference_outputs = _classification_loss_on_full_batch(model, adata_diss)
+
+    y = tensors[REGISTRY_KEYS.LABELS_KEY].ravel().long()
+    mask = y != model.module.n_labels["diss"] - 1
+    assert (~mask).sum() == 20  # the batch contains the "unknown" cells
+    linear = model.module.classifier_0.classifier[0]
+    z = inference_outputs["qz"].loc[mask]
+    expected = torch.nn.functional.cross_entropy(
+        torch.softmax(z @ linear.weight.T + linear.bias, dim=-1), y[mask], reduction="mean"
+    )
+    torch.testing.assert_close(loss, expected, rtol=0, atol=0)
+
+
+def test_logitnorm_loss_closed_form_and_scale_invariance():
+    from scviva.external.diagvi._module import _logitnorm_loss
+
+    torch.manual_seed(0)
+    logits = torch.randn(7, 4, dtype=torch.float64)
+    y = torch.tensor([0, 1, 2, 3, 0, 1, 2])
+    tau = 0.1
+
+    scaled = logits / (tau * torch.sqrt((logits**2).sum(dim=1, keepdim=True)))
+    expected = -(scaled.gather(1, y[:, None]).squeeze(1) - torch.logsumexp(scaled, dim=1)).mean()
+    torch.testing.assert_close(_logitnorm_loss(logits, y, tau), expected)
+
+    for c in (0.5, 3.0, 100.0):
+        torch.testing.assert_close(_logitnorm_loss(c * logits, y, tau), expected)
+
+    # Zero logits: the norm is clamped, the loss stays finite (uniform: log K)
+    zero = _logitnorm_loss(torch.zeros(2, 4), torch.tensor([0, 1]), tau)
+    assert torch.isfinite(zero)
+    torch.testing.assert_close(zero, torch.log(torch.tensor(4.0)))
+
+
+def test_classification_loss_logitnorm_in_module_loss():
+    from scvi import REGISTRY_KEYS
+
+    from scviva.external.diagvi._module import _logitnorm_loss
+
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI(
+        {"diss": adata_diss, "spatial": adata_spatial},
+        classification_loss="logitnorm",
+        logitnorm_tau=0.5,
+    )
+    loss, tensors, inference_outputs = _classification_loss_on_full_batch(model, adata_diss)
+    y = tensors[REGISTRY_KEYS.LABELS_KEY].ravel().long()
+    mask = y != model.module.n_labels["diss"] - 1
+    logits = model.module.classifier_0(inference_outputs["qz"].loc[mask])
+    torch.testing.assert_close(loss, _logitnorm_loss(logits, y[mask], 0.5))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected_logits"),
+    [
+        ({}, True),
+        ({"classification_loss": "ce"}, False),
+        ({"classification_loss": "ce", "classifier_logits": True}, True),
+        ({"classification_loss": "logitnorm"}, True),
+        ({"classification_loss": "logitnorm", "classifier_logits": True}, True),
+    ],
+)
+def test_classifier_logits_resolution(kwargs, expected_logits):
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI({"diss": adata_diss, "spatial": adata_spatial}, **kwargs)
+    clf = model.module.classifier_0
+    assert model.module.classifier_logits is expected_logits
+    assert clf.logits is expected_logits
+    has_softmax = isinstance(clf.classifier[-1], torch.nn.Softmax)
+    assert has_softmax is not expected_logits
+
+    out = clf(torch.randn(10, model.module.n_latent))
+    sums_to_one = torch.allclose(out.sum(dim=-1), torch.ones(10), atol=1e-5)
+    assert sums_to_one is not expected_logits
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"classification_loss": "focal"}, "classification_loss"),
+        ({"classification_loss": "logitnorm", "logitnorm_tau": 0.0}, "logitnorm_tau"),
+        ({"classification_loss": "logitnorm", "logitnorm_tau": -1.0}, "logitnorm_tau"),
+        ({"classification_loss": "logitnorm", "logitnorm_tau": float("nan")}, "logitnorm_tau"),
+        ({"classification_loss": "logitnorm", "classifier_logits": False}, "requires"),
+    ],
+)
+def test_classification_loss_invalid_arguments(kwargs, match):
+    adata_diss, adata_spatial = _make_labeled_pair()
+    with pytest.raises(ValueError, match=match):
+        DIAGVI({"diss": adata_diss, "spatial": adata_spatial}, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"classification_loss": "logitnorm"}, {"classifier_logits": True}],
+)
+def test_predict_celltype_probabilities(kwargs):
+    """Probabilities sum to 1 in every mode; the default (softmax) classifier's
+    probabilities are its own output, not a second softmax of it."""
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI({"diss": adata_diss, "spatial": adata_spatial}, **kwargs)
+    model.train(max_epochs=1, batch_size=16)
+    results = model.predict_celltype(labeled_modality="diss", target_modality="diss")
+
+    probs = results["probabilities"]
+    np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+    np.testing.assert_allclose(results["confidence"], probs.max(axis=1))
+    valid = set(adata_diss.obs["cell_type"].cat.categories)
+    assert set(results["predictions"]) <= valid
+
+    model.module.eval()
+    with torch.no_grad():
+        out = model.module.classifier_0(_qz_loc(model, adata_diss)).cpu()
+    expected = out if not model.module.classifier_logits else torch.softmax(out, dim=-1)
+    np.testing.assert_allclose(probs, expected.numpy(), rtol=1e-5, atol=1e-6)
+
+
+def _qz_loc(model, adata, mode="diss"):
+    tensors = next(iter(model._make_data_loader(adata, batch_size=adata.n_obs)))
+    return model.module.inference(
+        **model.module._get_inference_input(tensors), mode=mode, deterministic=True
+    )["z"]
+
+
+def test_logitnorm_train_save_load_roundtrip(tmp_path):
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI(
+        {"diss": adata_diss, "spatial": adata_spatial},
+        classification_loss="logitnorm",
+        logitnorm_tau=0.2,
+    )
+    model.train(max_epochs=1, batch_size=16)
+    before = model.predict_celltype(labeled_modality="diss")
+
+    save_path = tmp_path / "diagvi_logitnorm"
+    model.save(save_path, save_anndata=True)
+    loaded = DIAGVI.load(save_path)
+
+    assert loaded.module.classification_loss_type == "logitnorm"
+    assert loaded.module.logitnorm_tau == 0.2
+    assert loaded.module.classifier_logits is True
+    assert not isinstance(loaded.module.classifier_0.classifier[-1], torch.nn.Softmax)
+    after = loaded.predict_celltype(labeled_modality="diss")
+    np.testing.assert_array_equal(before["predictions"], after["predictions"])
+    np.testing.assert_allclose(before["probabilities"], after["probabilities"], rtol=1e-6)
+
+
+def test_load_model_saved_without_classification_loss_args(tmp_path):
+    """Models saved before the classification-loss arguments existed load with the
+    defaults ("ce" on the softmax classifier) and their weights."""
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI({"diss": adata_diss, "spatial": adata_spatial})
+    model.train(max_epochs=1, batch_size=16)
+    save_path = tmp_path / "diagvi_old"
+    model.save(save_path, save_anndata=True)
+
+    # Strip the new arguments from the saved init params, as in an older save
+    model_file = save_path / "model.pt"
+    saved = torch.load(model_file, weights_only=False)
+    init_params = saved["attr_dict"]["init_params_"]
+    for group in init_params.values():
+        for key in ("classification_loss", "logitnorm_tau", "classifier_logits"):
+            group.pop(key, None)
+    torch.save(saved, model_file)
+
+    loaded = DIAGVI.load(save_path)
+    assert loaded.module.classification_loss_type == "ce"
+    assert loaded.module.classifier_logits is False
+    assert isinstance(loaded.module.classifier_0.classifier[-1], torch.nn.Softmax)
+    for key, value in model.module.state_dict().items():
+        torch.testing.assert_close(loaded.module.state_dict()[key], value)
+
+
+# =============================================================================
+# Posterior mean vs posterior sample, and loading models saved before the loss option
+# =============================================================================
+
+
+def test_get_latent_representation_give_mean(trained_model):
+    """``give_mean=True`` returns the posterior mean (deterministic, equal to ``qz.loc``);
+    the default returns a posterior sample, reproducible under a fixed seed."""
+    import scvi
+
+    model, adata_seq, adata_spatial = trained_model
+    mean1 = model.get_latent_representation(give_mean=True)
+    mean2 = model.get_latent_representation(give_mean=True)
+    for name in mean1:
+        np.testing.assert_array_equal(mean1[name], mean2[name])
+
+    scvi.settings.seed = 0
+    sample1 = model.get_latent_representation()
+    scvi.settings.seed = 0
+    sample2 = model.get_latent_representation()
+    sample3 = model.get_latent_representation()
+    for name in sample1:
+        assert sample1[name].shape == mean1[name].shape
+        np.testing.assert_array_equal(sample1[name], sample2[name])
+        assert not np.allclose(sample1[name], mean1[name])
+        assert not np.allclose(sample2[name], sample3[name])
+
+    # The mean is the encoder's posterior location
+    tensors = next(iter(model._make_data_loader(adata_seq, batch_size=adata_seq.n_obs)))
+    inference = model.module.inference(**model.module._get_inference_input(tensors), mode="diss")
+    loc = inference["qz"].loc
+    np.testing.assert_allclose(mean1["diss"], loc.detach().cpu().numpy(), rtol=1e-5, atol=1e-6)
+
+
+def test_load_model_saved_without_classification_loss_uses_ce(tmp_path):
+    """A model saved before ``classification_loss`` existed was trained with cross-entropy and
+    loads as ``"ce"``, not with the newer ``"logitnorm"`` default."""
+    torch.manual_seed(0)
+    adata_diss, adata_spatial = _make_labeled_pair()
+    model = DIAGVI({"diss": adata_diss, "spatial": adata_spatial}, classification_loss="ce")
+    model.save(tmp_path / "m", save_anndata=False)
+
+    path = tmp_path / "m" / "model.pt"
+    saved = torch.load(path, weights_only=False)
+    params = saved["attr_dict"]["init_params_"]
+    for group in (params.get("non_kwargs", params), *params.get("kwargs", {}).values()):
+        for key in ("classification_loss", "logitnorm_tau", "classifier_logits"):
+            group.pop(key, None)
+    torch.save(saved, path)
+
+    loaded = DIAGVI.load(tmp_path / "m", adatas={"diss": adata_diss, "spatial": adata_spatial})
+    assert loaded.module.classification_loss_type == "ce"
+    assert loaded.module.classifier_logits is False
