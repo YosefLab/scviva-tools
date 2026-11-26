@@ -45,6 +45,7 @@ import scviva
    :toctree: reference/
    :nosignatures:
 
+   tl.CSDEAnalysis
    tl.HarremanAnalysis
    tl.VisionAnalysis
 ```

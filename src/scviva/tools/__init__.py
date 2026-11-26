@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from . import harreman, vision
+from . import csde, harreman, vision
+from .csde import CSDEAnalysis
 from .harreman import HarremanAnalysis
 from .vision import VisionAnalysis
 
-__all__ = ["HarremanAnalysis", "VisionAnalysis", "harreman", "vision"]
+__all__ = ["CSDEAnalysis", "HarremanAnalysis", "VisionAnalysis", "csde", "harreman", "vision"]

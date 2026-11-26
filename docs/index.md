@@ -86,6 +86,13 @@ Diagonal integration of unpaired multi-modal single-cell data using prior cross-
 Metabolic exchange and cell-cell communication inference from spatial transcriptomics data.
 :::
 
+:::{grid-item-card} CSDE
+:link: user_guide/models/csde
+:link-type: doc
+
+Corrected spatial differential expression via prediction-powered inference, combining automated and manually-validated annotations.
+:::
+
 :::{grid-item-card} gimVI
 :link: user_guide/models/gimvi
 :link-type: doc

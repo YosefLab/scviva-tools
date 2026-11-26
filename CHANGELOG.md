@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CSDE** (Boyeau et al. 2026): corrected spatial differential expression via
+  prediction-powered inference, ported from JAX to PyTorch. Adds `scviva.tl.CSDEAnalysis`,
+  the functional `scviva.tools.csde.tl.run_csde` API, Poisson and negative-binomial
+  per-class-intercept PPI models, Adam/SGD/L-BFGS optimizers, SpatialData/annotation-directory
+  helpers (`load_annotations`, `prepare_csde_inputs`), a user guide page and a tutorial.
+  `adata_pred` is reindexed to `adata_gt.var_names` before fitting (a `ValueError` is raised if
+  the gene sets differ).
+- The `spatial` extra now requires `spatialdata>=0.8`; `spatialdata` 0.7.x crashes on
+  `TableModel.parse()` with `anndata>=0.13`.
+
 ### Changed
 
 - The documentation is built with `scverse-doc` on Sphinx 9 and uses its sidebar layout:
