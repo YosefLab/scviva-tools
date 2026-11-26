@@ -78,16 +78,34 @@ class HarremanAnalysis:
         - DestVI: calls ``model.get_proportions()`` and attaches each cell-type
           proportion-weighted count matrix as ``adata.layers[cell_type]``.
         - RESOLVI: calls ``model.get_normalized_expression()`` and attaches as
-          ``adata.layers[HARREMAN_DENOISED_LAYER]``.
+          ``adata.layers[HARREMAN_DENOISED_LAYER]`` (``"harreman_denoised"``). When
+          ``layer_key`` is ``None`` this layer becomes the ``layer_key``, so all later
+          steps read the denoised expression instead of ``adata.X``. See the Notes for
+          what the layer contains.
         - SCVIVA: calls ``model.get_latent_representation()`` and attaches as
           ``adata.obsm[HARREMAN_LATENT_OBSM]``.
 
         Model reference is dropped after extraction.
     layer_key
-        Layer to use for counts. ``None`` uses ``adata.X``.
+        Layer to use for counts. ``None`` uses ``adata.X``, or the denoised layer when a
+        RESOLVI model is passed. A layer given here is always used, also with a model.
 
     Notes
     -----
+    The RESOLVI denoised layer is the output of ``model.get_normalized_expression()``:
+    normalized expression (with the default ``library_size=1``, each gene's fraction of
+    the expression of a cell), not counts. This matters for the choice of test:
+
+    - The parametric test of :meth:`compute_cell_communication` assumes standardized
+      values. With the default ``model=None`` the values are used as they are, so the Z
+      scores are proportional to the magnitude of the values and are close to zero on
+      this layer: ``select_significant_interactions()`` with the default
+      ``test="parametric"`` then selects nothing. ``model="danb"`` and
+      ``model="bernoulli"`` are models for counts and do not apply to this layer;
+      ``model="normal"`` standardizes each gene and does not depend on the scale.
+    - The non-parametric (permutation) test does not depend on the scale of the values.
+      Use ``select_significant_interactions(test="non-parametric")`` with this layer.
+
     Lower-level functions are grouped under accessors that default to this
     object's AnnData:
 
@@ -115,6 +133,14 @@ class HarremanAnalysis:
     >>> ha.setup(compute_neighbors_on_key="spatial", cell_type_key="cell_type")
     >>> ha.compute_gene_pairs()
     >>> ha.compute_cell_communication(mode="cell_type")
+
+    With RESOLVI model (the denoised layer is used in every step):
+
+    >>> ha = HarremanAnalysis(adata, model=resolvi_model)
+    >>> ha.setup(compute_neighbors_on_key="spatial", species="human")
+    >>> ha.compute_gene_pairs()
+    >>> ha.compute_cell_communication()
+    >>> ha.select_significant_interactions(test="non-parametric")
     """
 
     def __init__(
@@ -157,6 +183,13 @@ class HarremanAnalysis:
             self._is_deconvolved = True
         elif model_type == MODEL_RESOLVI:
             self._extract_resolvi_outputs(model, adata)
+            if self._layer_key is None:
+                self._layer_key = HARREMAN_DENOISED_LAYER
+                logger.info(
+                    "HarremanAnalysis: using layer '%s' (RESOLVI normalized expression) as "
+                    "layer_key.",
+                    HARREMAN_DENOISED_LAYER,
+                )
         elif model_type == MODEL_SCVIVA:
             self._extract_scviva_outputs(model, adata)
 
@@ -177,7 +210,7 @@ class HarremanAnalysis:
 
     @staticmethod
     def _extract_resolvi_outputs(model: BaseModelClass, adata: AnnData) -> None:
-        """Attach denoised counts from RESOLVI as a layer."""
+        """Attach denoised normalized expression from RESOLVI as a layer."""
         import numpy as np
         import pandas as pd
 
@@ -339,6 +372,10 @@ class HarremanAnalysis:
     ) -> None:
         """Filter genes before gene pair computation.
 
+        No filter is enabled by default: at least one of ``feature_elimination``,
+        ``autocorrelation_filt``, ``expression_filt`` or ``de_filt`` has to be set to
+        ``True``. Otherwise the genes are left as they are and a warning is logged.
+
         Parameters
         ----------
         model
@@ -359,6 +396,12 @@ class HarremanAnalysis:
             Print progress.
         """
         self._require(STEP_FILTER)
+        if not (feature_elimination or autocorrelation_filt or expression_filt or de_filt):
+            logger.warning(
+                "HarremanAnalysis: filter_genes() was called with no filter enabled, so no "
+                "gene is filtered. Set at least one of feature_elimination, "
+                "autocorrelation_filt, expression_filt or de_filt to True."
+            )
         _apply_gene_filtering(
             adata=self._adata,
             layer_key=self._layer_key,
@@ -650,6 +693,7 @@ class HarremanVisionAccessor:
         split_signed: bool = True,
         varm_key: str = "signatures",
         use_raw: bool = False,
+        min_signature_genes: int = 5,
         **kwargs,
     ) -> None:
         """Load gene signatures into ``adata.varm``.
@@ -667,17 +711,30 @@ class HarremanVisionAccessor:
             Key in ``adata.varm`` where the gene x signature matrix is stored.
         use_raw
             Whether to use ``adata.raw`` for gene matching.
+        min_signature_genes
+            Minimum number of matching genes required to keep a signature. Also
+            applied to the ``_UP``/``_DOWN`` parts when ``split_signed=True``.
         **kwargs
             Forwarded to :func:`~scviva.tools.vision.load_signatures`
-            (e.g. ``gmt_files``, ``dicts``, ``min_signature_genes``,
-            ``sig_gene_threshold``).
+            (e.g. ``gmt_files``, ``dicts``, ``sig_gene_threshold``).
         """
         from scviva.tools.vision.tools.signature import load_signatures, split_signed_signatures
 
         resolved = self._resolve(adata)
-        load_signatures(resolved, varm_key=varm_key, use_raw=use_raw, **kwargs)
+        load_signatures(
+            resolved,
+            varm_key=varm_key,
+            use_raw=use_raw,
+            min_signature_genes=min_signature_genes,
+            **kwargs,
+        )
         if split_signed:
-            split_signed_signatures(resolved, varm_key=varm_key, use_raw=use_raw)
+            split_signed_signatures(
+                resolved,
+                varm_key=varm_key,
+                use_raw=use_raw,
+                min_signature_genes=min_signature_genes,
+            )
 
     def signatures_from_file(self, adata: AnnData | None = None, **kwargs) -> None:
         """Alias for :meth:`load_signatures`.

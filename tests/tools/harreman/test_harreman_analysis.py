@@ -250,6 +250,34 @@ def test_filter_genes_calls_underlying_function(adata_spatial, monkeypatch):
     assert kwargs.get("threshold") == 0.3
 
 
+def test_filter_genes_without_filter_warns(adata_spatial, monkeypatch, caplog):
+    """The defaults enable no filter; this must not pass silently."""
+    ha = _setup_ha_no_network(adata_spatial, monkeypatch)
+    n_vars = adata_spatial.n_vars
+    with caplog.at_level("WARNING", logger="scviva.tools.harreman._analysis"):
+        ha.filter_genes()
+    messages = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(messages) == 1
+    assert "no filter enabled" in messages[0]
+    for argument in ["feature_elimination", "autocorrelation_filt", "expression_filt", "de_filt"]:
+        assert argument in messages[0]
+    # still a no-op that marks the step as done, as before
+    assert adata_spatial.n_vars == n_vars
+    assert STEP_FILTER in ha._completed_steps
+
+
+@pytest.mark.parametrize(
+    "argument", ["feature_elimination", "autocorrelation_filt", "expression_filt", "de_filt"]
+)
+def test_filter_genes_with_filter_does_not_warn(adata_spatial, monkeypatch, caplog, argument):
+    ha = _setup_ha_no_network(adata_spatial, monkeypatch)
+    with patch("scviva.tools.harreman._analysis._apply_gene_filtering") as mock_filt:
+        mock_filt.return_value = None
+        with caplog.at_level("WARNING", logger="scviva.tools.harreman._analysis"):
+            ha.filter_genes(**{argument: True})
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
 # ── compute_gene_pairs() tests ─────────────────────────────────────────────────
 
 
@@ -449,6 +477,119 @@ def test_repr_updates_after_setup(adata_spatial, monkeypatch):
     assert STEP_SETUP in r
 
 
+# ── ResolVI denoised layer ────────────────────────────────────────────────────
+
+
+class ResolVI:
+    """Stand-in for a trained model: HarremanAnalysis dispatches on the class name."""
+
+    def __init__(self, normalized: pd.DataFrame) -> None:
+        self._normalized = normalized
+
+    def get_normalized_expression(self) -> pd.DataFrame:
+        return self._normalized
+
+
+def _fake_resolvi(adata: AnnData) -> ResolVI:
+    """Normalized expression that differs from ``adata.X``: reversed genes, as fractions."""
+    X = np.asarray(adata.X)[:, ::-1] + 0.5
+    return ResolVI(
+        pd.DataFrame(
+            X / X.sum(axis=1, keepdims=True), index=adata.obs_names, columns=adata.var_names
+        )
+    )
+
+
+def test_resolvi_model_denoised_layer_is_used_by_every_step(adata_spatial, monkeypatch):
+    import scviva.tools.harreman._analysis as _mod
+    from scviva.tools.harreman._constants import HARREMAN_DENOISED_LAYER
+
+    monkeypatch.setattr(_mod, "_extract_interaction_db", _make_mock_extract_db(adata_spatial))
+    model = _fake_resolvi(adata_spatial)
+    ha = HarremanAnalysis(adata_spatial, model=model)
+
+    np.testing.assert_array_equal(
+        adata_spatial.layers[HARREMAN_DENOISED_LAYER], model.get_normalized_expression().values
+    )
+    assert ha._layer_key == HARREMAN_DENOISED_LAYER
+
+    ha.setup(compute_neighbors_on_key="spatial", n_neighbors=5)
+    params = adata_spatial.uns[HARREMAN_UNS_KEY][HARREMAN_PARAMS_KEY]
+    assert params["layer_key"] == HARREMAN_DENOISED_LAYER
+
+    with patch("scviva.tools.harreman._analysis._apply_gene_filtering") as mock_filt:
+        ha.filter_genes(feature_elimination=True)
+    assert mock_filt.call_args.kwargs["layer_key"] == HARREMAN_DENOISED_LAYER
+
+    with patch("scviva.tools.harreman._analysis._compute_gene_pairs") as mock_gp:
+        ha.compute_gene_pairs()
+    assert mock_gp.call_args.kwargs["layer_key"] == HARREMAN_DENOISED_LAYER
+
+    for mode, target in [
+        ("standard", "_compute_cell_communication"),
+        ("cell_type", "_compute_ct_cell_communication"),
+    ]:
+        with patch(f"scviva.tools.harreman._analysis.{target}") as mock_ccc:
+            ha.compute_cell_communication(mode=mode)
+        assert mock_ccc.call_args.kwargs["layer_key_p_test"] == HARREMAN_DENOISED_LAYER
+        assert mock_ccc.call_args.kwargs["layer_key_np_test"] == HARREMAN_DENOISED_LAYER
+
+
+def test_resolvi_model_explicit_layer_key_wins(adata_spatial):
+    from scviva.tools.harreman._constants import HARREMAN_DENOISED_LAYER
+
+    adata_spatial.layers["my_layer"] = adata_spatial.X.copy()
+    ha = HarremanAnalysis(adata_spatial, model=_fake_resolvi(adata_spatial), layer_key="my_layer")
+
+    assert ha._layer_key == "my_layer"
+    # the denoised layer is still attached, for use in single steps
+    assert HARREMAN_DENOISED_LAYER in adata_spatial.layers
+
+
+def test_without_model_layer_key_stays_none(adata_spatial):
+    assert HarremanAnalysis(adata_spatial)._layer_key is None
+
+
+def test_resolvi_model_cell_communication_reads_denoised_values():
+    """End to end on a small LR database: the scores come from the model output, not ``X``."""
+    from scviva.tools.harreman._constants import HARREMAN_DENOISED_LAYER
+    from scviva.tools.harreman.tools.cell_communication import compute_gene_pairs
+
+    def _ccc_scores(use_model: bool) -> np.ndarray:
+        n_obs = 40
+        gene_names = [f"gene{i}" for i in range(8)]
+        rng = np.random.default_rng(0)
+        adata = AnnData(
+            X=rng.poisson(2.0, size=(n_obs, len(gene_names))).astype(float),
+            obs=pd.DataFrame(index=[f"cell{i}" for i in range(n_obs)]),
+            var=pd.DataFrame(index=gene_names),
+            obsm={"spatial": rng.uniform(0, 100, size=(n_obs, 2))},
+        )
+        database = pd.DataFrame(0.0, index=gene_names, columns=["pair0", "pair1"])
+        database.loc[["gene0", "gene2"], ["pair0", "pair1"]] = np.eye(2)  # ligands
+        database.loc[["gene1", "gene3"], ["pair0", "pair1"]] = -np.eye(2)  # receptors
+        adata.varm["database"] = database
+        adata.uns["database"] = "LR"
+        adata.uns["ligand"] = pd.DataFrame({0: ["gene0", "gene2"]}, index=["pair0", "pair1"])
+        adata.uns["receptor"] = pd.DataFrame({0: ["gene1", "gene3"]}, index=["pair0", "pair1"])
+
+        model = _fake_resolvi(adata)
+        ha = HarremanAnalysis(adata, model=model if use_model else None)
+        if not use_model:
+            adata.layers[HARREMAN_DENOISED_LAYER] = model.get_normalized_expression().values
+        ha.tl.compute_knn_graph(compute_neighbors_on_key="spatial", n_neighbors=5)
+        compute_gene_pairs(adata, layer_key=ha._layer_key, ct_specific=False, verbose=False)
+        ha._completed_steps.update({STEP_SETUP, STEP_GENE_PAIRS})
+        ha.compute_cell_communication(test="parametric", device="cpu")
+        assert adata.uns["layer_key_p_test"] == (HARREMAN_DENOISED_LAYER if use_model else None)
+        return np.asarray(adata.uns["ccc_results"]["p"]["gp"]["cs"])
+
+    scores_x = _ccc_scores(use_model=False)
+    scores_model = _ccc_scores(use_model=True)
+    assert np.isfinite(scores_model).all()
+    assert not np.allclose(scores_model, scores_x)
+
+
 # ── Integration tests (require model training) ────────────────────────────────
 # Run with: pytest -m optional tests/external/harreman/test_harreman_analysis.py
 
@@ -575,6 +716,21 @@ def test_integration_resolvi_attaches_denoised_layer(resolvi_model_and_adata):
     model, adata = resolvi_model_and_adata
     ha = HarremanAnalysis(adata.copy(), model=model)
     assert HARREMAN_DENOISED_LAYER in ha.adata.layers
+
+
+@pytest.mark.optional
+def test_integration_resolvi_uses_denoised_layer(resolvi_model_and_adata):
+    """RESOLVI: the denoised layer is the layer every later step reads."""
+    from scviva.tools.harreman._constants import HARREMAN_DENOISED_LAYER
+
+    model, adata = resolvi_model_and_adata
+    ha = HarremanAnalysis(adata.copy(), model=model)
+    assert ha._layer_key == HARREMAN_DENOISED_LAYER
+    denoised = ha.adata.layers[HARREMAN_DENOISED_LAYER]
+    # normalized expression: fractions of each cell's expression, not counts
+    assert np.isfinite(denoised).all()
+    assert (denoised >= 0).all()
+    assert denoised.max() <= 1
 
 
 @pytest.mark.optional

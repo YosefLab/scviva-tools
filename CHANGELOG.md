@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9]
+
 ### Changed
 
 - The documentation is built with `scverse-doc` on Sphinx 9 and uses its sidebar layout:
@@ -15,9 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [scvi-tools#4091](https://github.com/scverse/scvi-tools/pull/4091). The Colab launch button on
   tutorial pages, the download and full screen buttons, and the tutorial filters are kept, and
   `[source]` links now point to GitHub instead of highlighted copies of the code.
+- {meth}`scviva.tl.HarremanAnalysis.filter_genes` logs a warning when it is called with no filter
+  enabled, which is the default (`feature_elimination`, `autocorrelation_filt`, `expression_filt`
+  and `de_filt` are all `False`). Before, the call returned without filtering any gene and
+  without saying so. The defaults are unchanged.
 
 ### Fixed
 
+- `scviva.tl.vision.rank_genes_groups` with the Wilcoxon test (the default, used by
+  `VisionAnalysis.compute_differential_expression` and `compute_one_vs_one_de`) gave every gene
+  or signature of a group the same score and p-value under pandas 3. The rank sums were taken
+  with `np.sum` on a DataFrame, which in pandas 3 sums over all cells and features. They are now
+  summed per feature. Results from pandas 2 are unchanged.
+- `HarremanAnalysis.compute_cell_communication(mode="cell_type")` no longer fails with a
+  `KeyError` under pandas 3 when `setup()` was given a `sample_key`. The cell types of each
+  sample were selected from a Series by position with `[]`, which pandas 3 treats as labels.
 - `SpatialStereoscope.from_rna_model` accepts spatial data whose genes are a subset of the genes
   of the reference `RNAStereoscope` model, in any order: the gene-specific parameters of the
   reference are matched by gene name. Before, the parameters were used as they were, so a subset
@@ -64,6 +78,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"cell_type"` mode. The relabeling used a chained assignment, which pandas 3 copy-on-write
   turns into a silent no-op, so metabolite-level results and `adata.uns["gene_pair_dict"]` were
   keyed by individual interaction names (e.g. `CCL19_CCR7`) instead of pathways.
+- `HarremanAnalysis(adata, model=resolvi_model)` now uses the denoised expression of the model.
+  The output of `model.get_normalized_expression()` was stored in
+  `adata.layers["harreman_denoised"]`, but `layer_key` stayed `None`, so `filter_genes`,
+  `compute_gene_pairs` and `compute_cell_communication` read `adata.X` and the model had no effect
+  on the results. The layer is now the `layer_key` unless one is passed explicitly. It holds
+  normalized expression, not counts: the parametric test with the default `model=None` gives Z
+  scores close to zero on it, so use `select_significant_interactions(test="non-parametric")`
+  (see the Notes of {class}`scviva.tl.HarremanAnalysis`). Results of analyses that passed a
+  resolVI model change.
+- The `_UP` and `_DOWN` parts that `VisionAnalysis.load_signatures` and `ha.vs.load_signatures`
+  add for signed signatures now respect `min_signature_genes`. Before, only the combined
+  signature was checked, so a part with fewer genes than the minimum (for example a `_DOWN` part
+  with two genes) was scored. `split_signed_signatures` has a new keyword `min_signature_genes`
+  for this; its default of 0 keeps every part, as before.
+- {meth}`scviva.tl.VisionAnalysis.compute_differential_expression` no longer returns `NaN` in the
+  `logfoldchanges` column of `adata.uns["vision_signature_differential"]`,
+  `adata.uns["vision_protein_differential"]` and the numeric table of
+  `adata.uns["vision_meta_differential"]`. The log2 fold change assumes log-normalized
+  expression, and was undefined for signature scores (z-scores, which can be negative), numeric
+  `adata.obs` columns with negative values and raw protein counts. For these tables the column
+  now holds the difference of the group means (group minus rest). Numeric `adata.obs` columns are
+  no longer log-transformed for this comparison, which does not change the rank-based test.
+  `scviva.tools.vision.rank_genes_groups` has a new argument `log_transformed` (default `True`)
+  that selects this; gene-level differential expression is unchanged.
 
 ## [0.1.8] - 2026-10-28
 

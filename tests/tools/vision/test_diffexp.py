@@ -99,3 +99,88 @@ def test_rank_genes_groups_method_none_uses_wilcoxon():
     adata = _make_grouped_adata()
     rank_genes_groups(adata, groupby="group", use_raw=False, method=None)
     assert adata.uns["rank_genes_groups"]["params"]["method"] == "wilcoxon"
+
+
+def _stats_by_name(adata: AnnData, group: str, column: str) -> pd.Series:
+    result = adata.uns["rank_genes_groups"]
+    return pd.Series(result[column][group], index=result["names"][group])
+
+
+def test_rank_genes_groups_default_logfoldchanges_are_log2_fold_changes():
+    """Log-normalized expression keeps the log2 fold change of the back-transformed means."""
+    adata = _make_grouped_adata()
+    rank_genes_groups(adata, groupby="group", use_raw=False)
+
+    in_group = (adata.obs["group"] == "g0").to_numpy()
+    mean_group = adata.X[in_group].mean(axis=0)
+    mean_rest = adata.X[~in_group].mean(axis=0)
+    expected = np.log2((np.expm1(mean_group) + 1e-9) / (np.expm1(mean_rest) + 1e-9))
+
+    observed = _stats_by_name(adata, "g0", "logfoldchanges")[adata.var_names]
+    np.testing.assert_allclose(observed.to_numpy(), expected, rtol=1e-5)
+    assert adata.uns["rank_genes_groups"]["params"]["log_transformed"] is True
+
+
+def test_rank_genes_groups_not_log_transformed_reports_mean_difference():
+    """Z-scored values can be negative: the fold change is NaN, the mean difference is not."""
+    adata = _make_grouped_adata()
+    rng = np.random.default_rng(1)
+    adata.X = rng.normal(size=adata.shape)
+    adata.X[adata.obs["group"] == "g0", 1] -= 2.0  # negative group mean, positive rest mean
+    adata.X[adata.obs["group"] != "g0", 1] += 2.0
+
+    rank_genes_groups(adata, groupby="group", use_raw=False)
+    assert np.isnan(_stats_by_name(adata, "g0", "logfoldchanges")["gene1"])
+
+    rank_genes_groups(adata, groupby="group", use_raw=False, log_transformed=False)
+    for group in ["g0", "g1", "g2"]:
+        in_group = (adata.obs["group"] == group).to_numpy()
+        expected = adata.X[in_group].mean(axis=0) - adata.X[~in_group].mean(axis=0)
+        observed = _stats_by_name(adata, group, "logfoldchanges")[adata.var_names]
+        assert not observed.isna().any()
+        np.testing.assert_allclose(observed.to_numpy(), expected, rtol=1e-5, atol=1e-6)
+
+    # with a reference group, the difference is to the mean of that group
+    rank_genes_groups(adata, groupby="group", use_raw=False, reference="g2", log_transformed=False)
+    expected = adata.X[(adata.obs["group"] == "g0").to_numpy()].mean(axis=0) - adata.X[
+        (adata.obs["group"] == "g2").to_numpy()
+    ].mean(axis=0)
+    observed = _stats_by_name(adata, "g0", "logfoldchanges")[adata.var_names]
+    np.testing.assert_allclose(observed.to_numpy(), expected, rtol=1e-5, atol=1e-6)
+
+
+def test_wilcoxon_statistics_are_per_gene():
+    """Rank sums are taken per gene, so scores and p-values differ between genes.
+
+    Regression test: with pandas 3, ``np.sum`` on the rank DataFrame summed over all cells
+    and genes, so every gene of a group got the same score and p-value.
+    """
+    from scipy.stats import norm, rankdata
+
+    rng = np.random.default_rng(0)
+    n = 40
+    X = rng.normal(size=(2 * n, 5))
+    X[:n, 0] += 3.0  # gene0 is higher in group a; continuous values, so no ties
+    obs = pd.DataFrame({"group": pd.Categorical(["a"] * n + ["b"] * n)})
+    obs.index = [f"cell{i}" for i in range(2 * n)]
+    var = pd.DataFrame(index=[f"gene{i}" for i in range(5)])
+    adata = AnnData(X=X, obs=obs, var=var)
+
+    # expected values from the rank sum of group a, with VISION's continuity correction
+    rank_sum = rankdata(X, axis=0)[:n].sum(axis=0)
+    sd = np.sqrt(n * n * (2 * n + 1) / 12.0)
+    z = (rank_sum - n * (2 * n + 1) / 2.0) / sd
+    expected_score = dict(zip(var.index, rank_sum / (n * n), strict=True))
+    expected_pval = dict(zip(var.index, 2 * norm.cdf(-np.abs(z) + 0.5 / sd), strict=True))
+
+    for reference in ["rest", "b"]:  # the two code paths of the Wilcoxon test
+        rank_genes_groups(adata, "group", method="wilcoxon", reference=reference)
+        res = adata.uns["rank_genes_groups"]
+        names = list(res["names"]["a"])
+        scores = np.asarray(res["scores"]["a"], dtype=float)
+        pvals = np.asarray(res["pvals"]["a"], dtype=float)
+        assert names[0] == "gene0"
+        assert sorted(names) == list(var.index)
+        np.testing.assert_allclose(scores, [expected_score[g] for g in names], rtol=1e-5)
+        np.testing.assert_allclose(pvals, [expected_pval[g] for g in names], rtol=1e-6)
+        assert len(np.unique(np.round(scores, 6))) == 5

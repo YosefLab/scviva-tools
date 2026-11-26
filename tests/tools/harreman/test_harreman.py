@@ -329,3 +329,41 @@ def test_write_read_h5ad_roundtrip(adata_with_autocorrelation):
 def test_write_h5ad_no_filename_raises(adata_spatial):
     with pytest.raises(ValueError, match="path to save"):
         write_h5ad(adata_spatial)
+
+
+def test_standardize_ct_counts_sample_specific_with_barcode_index():
+    """Per-sample centering selects cell types by position, also for a barcode-indexed Series.
+
+    Regression test: ``cell_types[subset]`` with integer positions raised a ``KeyError`` under
+    pandas 3, so cell-type-mode communication failed whenever ``sample_key`` was set.
+    """
+    import pandas as pd
+    import torch
+    from anndata import AnnData
+
+    from scviva.tools.harreman.tools.cell_communication._ct_ccc_scoring import (
+        center_ct_counts_torch,
+        standardize_ct_counts,
+    )
+
+    rng = np.random.default_rng(0)
+    n_cells, n_genes = 40, 6
+    obs = pd.DataFrame(
+        {"sample": np.repeat(["s1", "s2"], n_cells // 2), "ct": np.tile(["a", "b"], n_cells // 2)},
+        index=[f"cell_{i}" for i in range(n_cells)],
+    )
+    adata = AnnData(np.zeros((n_cells, n_genes)), obs=obs)
+    adata.uns["sample_key"] = "sample"
+    counts = torch.tensor(rng.poisson(3.0, size=(n_genes, n_cells)), dtype=torch.float64)
+    num_umi = counts.sum(0)
+    cell_types = adata.obs["ct"]
+
+    out = standardize_ct_counts(adata, counts.clone(), "normal", num_umi, True, cell_types)
+
+    assert out.shape == counts.shape
+    for sample in ["s1", "s2"]:
+        subset = np.where(adata.obs["sample"] == sample)[0]
+        expected = center_ct_counts_torch(
+            counts[:, subset], num_umi[subset], "normal", cell_types.iloc[subset]
+        )
+        np.testing.assert_allclose(out[:, subset].numpy(), expected.numpy())

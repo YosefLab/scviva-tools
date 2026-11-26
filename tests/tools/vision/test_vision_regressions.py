@@ -212,6 +212,149 @@ def test_load_signatures_use_raw_stores_raw_aligned_signatures():
     assert list(adata.raw.varm["signatures"].index) == adata.raw.var_names.tolist()
 
 
+_SIGNED_DICTS = [
+    {
+        # 5 up genes and 2 down genes: kept as a signed signature, only the up half is large
+        "mixed_up": [f"gene{i}" for i in range(5)],
+        "mixed_down": ["gene5", "gene6"],
+        # 5 genes in each direction
+        "balanced_up": [f"gene{i}" for i in range(5)],
+        "balanced_down": [f"gene{i}" for i in range(5, 10)],
+    }
+]
+
+
+def test_split_signed_signatures_applies_min_signature_genes():
+    adata = _make_adata(n_obs=20, n_vars=12)
+    vision_signature.load_signatures(adata, dicts=_SIGNED_DICTS, min_signature_genes=5)
+    assert list(adata.varm["signatures"].columns) == ["mixed", "balanced"]
+    # up and down genes stay merged in one signed signature
+    assert (adata.varm["signatures"]["mixed"] > 0).sum() == 5
+    assert (adata.varm["signatures"]["mixed"] < 0).sum() == 2
+
+    # default: every half is added, as before
+    unfiltered = adata.copy()
+    vision_signature.split_signed_signatures(unfiltered)
+    assert list(unfiltered.varm["signatures"].columns) == [
+        "mixed",
+        "balanced",
+        "mixed_UP",
+        "mixed_DOWN",
+        "balanced_UP",
+        "balanced_DOWN",
+    ]
+
+    for _ in range(2):  # a second call adds nothing
+        vision_signature.split_signed_signatures(adata, min_signature_genes=5)
+        sig = adata.varm["signatures"]
+        assert list(sig.columns) == [
+            "mixed",
+            "balanced",
+            "mixed_UP",
+            "balanced_UP",
+            "balanced_DOWN",
+        ]
+        assert ((sig != 0).sum(axis=0) >= 5).all()
+
+    # also when only the down half was kept by an earlier call
+    adata.varm["signatures"] = sig.rename(columns={"mixed_UP": "mixed_DOWN"})
+    vision_signature.split_signed_signatures(adata, min_signature_genes=5)
+    assert adata.varm["signatures"].columns.is_unique
+
+
+def test_vision_analysis_load_signatures_filters_split_halves():
+    adata = _make_adata(n_obs=20, n_vars=12)
+    VisionAnalysis(adata).load_signatures(dicts=_SIGNED_DICTS)  # min_signature_genes=5
+    assert "mixed_UP" in adata.varm["signatures"]
+    assert "mixed_DOWN" not in adata.varm["signatures"]
+
+    adata = _make_adata(n_obs=20, n_vars=12)
+    VisionAnalysis(adata).load_signatures(dicts=_SIGNED_DICTS, min_signature_genes=2)
+    assert "mixed_DOWN" in adata.varm["signatures"]
+
+
+def test_harreman_vision_load_signatures_filters_split_halves():
+    adata = _make_adata(n_obs=20, n_vars=12)
+    HarremanAnalysis(adata).vs.load_signatures(dicts=_SIGNED_DICTS)  # min_signature_genes=5
+    assert "mixed_UP" in adata.varm["signatures"]
+    assert "mixed_DOWN" not in adata.varm["signatures"]
+
+    adata = _make_adata(n_obs=20, n_vars=12)
+    HarremanAnalysis(adata).vs.load_signatures(dicts=_SIGNED_DICTS, min_signature_genes=2)
+    assert "mixed_DOWN" in adata.varm["signatures"]
+
+
+def test_compute_differential_expression_reports_mean_differences_not_nan():
+    """Signature scores, numeric obs columns and proteins are not log-normalized expression."""
+    n_obs, n_vars = 120, 30
+    rng = np.random.default_rng(42)
+    X = rng.poisson(2.0, size=(n_obs, n_vars)).astype(np.float32)
+    X[:40, :10] += 3  # SIG_A is higher in group "a"
+    obs = pd.DataFrame(
+        {
+            "group": pd.Categorical(np.repeat(["a", "b", "c"], 40)),
+            "signed_covariate": rng.normal(size=n_obs),
+        },
+        index=[f"cell{i}" for i in range(n_obs)],
+    )
+    var = pd.DataFrame(index=[f"gene{i}" for i in range(n_vars)])
+    adata = AnnData(X=csr_matrix(np.log1p(X)), obs=obs, var=var)
+    adata.obsm["X_pca"] = rng.normal(size=(n_obs, 5)).astype(np.float32)
+    adata.obsm["protein"] = pd.DataFrame(
+        rng.poisson(900, size=(n_obs, 3)).astype(float),
+        index=adata.obs_names,
+        columns=["p0", "p1", "p2"],
+    )
+
+    va = VisionAnalysis(adata, protein_obsm_key="protein")
+    va.load_signatures(
+        dicts=[
+            {
+                "SIG_A": [f"gene{i}" for i in range(10)],
+                "SIG_B": [f"gene{i}" for i in range(10, 20)],
+            }
+        ]
+    )
+    va.setup(compute_neighbors_on_key="X_pca", num_neighbors=15, exact_knn=True)
+    va.compute_signatures()
+    va.compute_differential_expression()
+
+    in_group = (adata.obs["group"] == "a").to_numpy()
+    tables = {
+        "signature": (
+            adata.uns["vision_signature_differential"]["group"],
+            adata.obsm["vision_signatures"],
+        ),
+        "meta": (
+            adata.uns[META_DIFFERENTIAL_UNS_KEY]["group"]["numeric"],
+            adata.obs[["signed_covariate"]],
+        ),
+        "protein": (adata.uns["vision_protein_differential"]["group"], adata.obsm["protein"]),
+    }
+    for name, (table, values) in tables.items():
+        assert not table["logfoldchanges"].isna().any(), name
+        observed = table[table["group"] == "a"].set_index("names")["logfoldchanges"]
+        expected = values[in_group].mean(axis=0) - values[~in_group].mean(axis=0)
+        np.testing.assert_allclose(
+            observed[expected.index].to_numpy(), expected.to_numpy(), rtol=1e-4, atol=1e-5
+        )
+
+    # the scores are z-scores with negative values, for which a fold change is undefined
+    assert (adata.obsm["vision_signatures"].to_numpy() < 0).any()
+    sig_a = tables["signature"][0].query("group == 'a' and names == 'SIG_A'")
+    assert sig_a["logfoldchanges"].item() > 0
+
+    # gene-level differential expression on log-normalized data keeps the log2 fold change
+    de = va.compute_one_vs_one_de("group", "a", "b").set_index("names")
+    dense = adata.X.toarray()
+    mean_a = dense[in_group].mean(axis=0)
+    mean_b = dense[(adata.obs["group"] == "b").to_numpy()].mean(axis=0)
+    expected = np.log2((np.expm1(mean_a) + 1e-9) / (np.expm1(mean_b) + 1e-9))
+    np.testing.assert_allclose(
+        de.loc[adata.var_names, "logfoldchanges"].to_numpy(), expected, rtol=1e-4
+    )
+
+
 def test_generate_permutations_null_matches_small_signature_clusters():
     adata = _make_adata(n_vars=6)
     adata.varm["signatures"] = _signature_matrix(adata, columns=["sig0"])
