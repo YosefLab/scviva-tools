@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the true spatial kNN). Neighbors cached in an AnnData by an older release are recomputed
   on the next `setup_anndata` call. resolVI models trained with `prepare_data=True` should be
   retrained.
+- `ResolVI.setup_anndata(..., prepare_data=True)` no longer stores a cell as its own spatial
+  neighbor. With more than a few thousand cells (scanpy's approximate search), or with
+  rapids-singlecell, the neighbor graph holds each cell's zero distance to itself, so the cell
+  took the first of its `n_neighbors` slots and the farthest true neighbor was dropped. On a
+  117,000-cell Xenium section this raised the mean inferred diffusion proportion from 0.04 to
+  0.38. Cached neighbors are recomputed on the next `setup_anndata` call, and resolVI models
+  trained on such data with `prepare_data=True` should be retrained.
 - `pip install "scviva-tools[all]"` works on macOS and Windows again. The RAPIDS packages in the
   `rapids`, `rapids-cuda12` and `rapids-cuda13` extras (cuML, cuGraph, cuPy, rapids-singlecell)
   are now installed only on Linux, the only platform RAPIDS supports. Before, `[all]` pulled in

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    import numpy as np
 
 
 def match_reference_genes(
@@ -43,8 +42,9 @@ def match_reference_genes(
     Raises
     ------
     ValueError
-        If the spatial data has genes that are absent from the reference, or if
-        ``allow_subset`` is ``False`` and the genes are not identical and in the same order.
+        If the spatial data has genes that are absent from the reference, if a spatial gene
+        matches several reference genes, or if ``allow_subset`` is ``False`` and the genes are
+        not identical and in the same order.
     """
     st_index = pd.Index(st_var_names)
     ref_index = pd.Index(ref_var_names)
@@ -79,7 +79,18 @@ def match_reference_genes(
 
     if not st_index.is_unique:
         raise ValueError(f"{model_name}: the gene names of the spatial data are not unique.")
-    positions = ref_index.get_indexer(st_index)
+    # `get_indexer` requires a unique index, so match against the reference names that occur
+    # once; duplicates only matter for the spatial genes that would match them.
+    unique_ref = ~ref_index.duplicated(keep=False)
+    ambiguous = st_index.isin(ref_index[~unique_ref])
+    if ambiguous.any():
+        raise ValueError(
+            f"{model_name}: {int(ambiguous.sum())} genes of the spatial data match several "
+            f"genes of the reference model, for example {st_index[ambiguous][0]!r}. Make the "
+            "gene names of the reference unique."
+        )
+    positions = ref_index[unique_ref].get_indexer(st_index)
+    positions = np.where(positions < 0, -1, np.flatnonzero(unique_ref)[positions])
     if (positions < 0).any():
         raise ValueError(
             f"{model_name}: {int((positions < 0).sum())} genes of the spatial data are absent "
