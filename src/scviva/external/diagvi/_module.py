@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import math
+from typing import TYPE_CHECKING, Literal
 
 import torch
 import torch.nn as nn
@@ -51,6 +52,42 @@ NORMALIZE_LIKELIHOODS = {"nb", "zinb", "nbmixture"}
 NON_NORMALIZE_LIKELIHOODS = {"log1pnormal", "ziln", "zig"}
 OTHER_LIKELIHOODS = {"normal"}
 
+# Supported losses for the semi-supervised classifiers
+CLASSIFICATION_LOSSES = ("ce", "logitnorm")
+
+
+def _resolve_classifier_logits(
+    classification_loss: str, logitnorm_tau: float, classifier_logits: bool | None
+) -> bool:
+    """Validate the classification-loss arguments; return whether the classifiers emit logits."""
+    if classification_loss not in CLASSIFICATION_LOSSES:
+        raise ValueError(
+            f"`classification_loss` must be one of {CLASSIFICATION_LOSSES}, "
+            f"got {classification_loss!r}."
+        )
+    if not (isinstance(logitnorm_tau, int | float) and math.isfinite(logitnorm_tau)) or (
+        logitnorm_tau <= 0
+    ):
+        raise ValueError(f"`logitnorm_tau` must be a finite number > 0, got {logitnorm_tau!r}.")
+    if classifier_logits is None:
+        return classification_loss == "logitnorm"
+    if classification_loss == "logitnorm" and not classifier_logits:
+        raise ValueError(
+            "`classification_loss='logitnorm'` requires the classifiers to return logits; "
+            "leave `classifier_logits` as None or set it to True."
+        )
+    return bool(classifier_logits)
+
+
+def _logitnorm_loss(logits: torch.Tensor, y: torch.Tensor, tau: float) -> torch.Tensor:
+    """LogitNorm loss (Wei et al., ICML 2022, eq. 4): cross-entropy of ``f / (tau * ||f||_2)``.
+
+    The L2 norm of each row of ``logits`` is clamped at 1e-7 to avoid division by zero.
+    Mean over cells.
+    """
+    norm = logits.norm(p=2, dim=-1, keepdim=True).clamp(min=1e-7)
+    return F.cross_entropy(logits / (norm * tau), y, reduction="mean")
+
 
 class DIAGVAE(BaseModuleClass):
     """Variational autoencoder module for DIAGVI multi-modal integration.
@@ -88,6 +125,27 @@ class DIAGVAE(BaseModuleClass):
         Number of hidden layers.
     dropout_rate
         Dropout rate for encoders.
+    classification_loss
+        Loss of the semi-supervised classifiers on labelled cells. One of:
+
+        * ``"logitnorm"`` (default): LogitNorm (Wei et al., ICML 2022, arXiv:2205.09310,
+          eq. 4), the cross-entropy of ``f / (logitnorm_tau * ||f||_2)`` on the classifier
+          logits ``f``. The loss cannot be lowered by growing the logit norm, which bounds the
+          margin the classifier can enforce on the latent space. Always uses logits.
+        * ``"ce"``: cross-entropy. With ``classifier_logits=False`` (the default for
+          ``"ce"``) the classifiers end in a softmax and ``cross_entropy`` is applied to their
+          probabilities (a second softmax). This reproduces the loss of earlier releases
+          exactly.
+    logitnorm_tau
+        Temperature ``tau`` of the LogitNorm loss. Must be > 0. Only used with
+        ``classification_loss="logitnorm"``.
+    classifier_logits
+        Whether the classifiers return logits (no final softmax). ``None`` (default) means
+        ``True`` for ``"logitnorm"`` and ``False`` for ``"ce"``. ``classification_loss="ce"``
+        with ``classifier_logits=True`` is plain cross-entropy on logits (no double softmax).
+        Removing the double softmax strengthens the classification gradient on the latent
+        space, so ``lam_class`` (of the training plan) may need lowering; at the default
+        ``lam_class=5`` it can collapse the cross-modal alignment.
     """
 
     def __init__(
@@ -105,8 +163,16 @@ class DIAGVAE(BaseModuleClass):
         n_hidden: int,
         n_layers: int,
         dropout_rate: float,
+        classification_loss: Literal["ce", "logitnorm"] = "logitnorm",
+        logitnorm_tau: float = 0.1,
+        classifier_logits: bool | None = None,
     ):
         super().__init__()
+        self.classifier_logits = _resolve_classifier_logits(
+            classification_loss, logitnorm_tau, classifier_logits
+        )
+        self.classification_loss_type = classification_loss
+        self.logitnorm_tau = float(logitnorm_tau)
 
         # Learnable parameters
         self.gmm_logits = nn.ParameterDict()
@@ -209,6 +275,7 @@ class DIAGVAE(BaseModuleClass):
             self.classifier_0 = Classifier(
                 n_latent,
                 n_labels=self.n_labels[self.input_names[0]],
+                logits=self.classifier_logits,
                 use_batch_norm=False,
                 use_layer_norm=True,
                 **cls_parameters,
@@ -225,6 +292,7 @@ class DIAGVAE(BaseModuleClass):
             self.classifier_1 = Classifier(
                 n_latent,
                 n_labels=self.n_labels[self.input_names[1]],
+                logits=self.classifier_logits,
                 use_batch_norm=False,
                 use_layer_norm=True,
                 **cls_parameters,
@@ -522,23 +590,13 @@ class DIAGVAE(BaseModuleClass):
         # excluded, not trained against as a real class.
         classification_loss = 0.0
         if self.classifier_0 is not None and mode == self.input_names[0]:
-            y = tensors[REGISTRY_KEYS.LABELS_KEY].ravel().long()
-            z_mean = inference_outputs[MODULE_KEYS.QZ_KEY].loc
-            labeled_mask = y != (self.n_labels[mode] - 1)
-            if labeled_mask.any():
-                y_logits = self.classifier_0(z_mean[labeled_mask])
-                classification_loss += torch.nn.functional.cross_entropy(
-                    y_logits, y[labeled_mask], reduction="mean"
-                )
+            classification_loss += self._classifier_loss(
+                self.classifier_0, tensors, inference_outputs, mode
+            )
         if self.classifier_1 is not None and mode == self.input_names[1]:
-            y = tensors[REGISTRY_KEYS.LABELS_KEY].ravel().long()
-            z_mean = inference_outputs[MODULE_KEYS.QZ_KEY].loc
-            labeled_mask = y != (self.n_labels[mode] - 1)
-            if labeled_mask.any():
-                y_logits = self.classifier_1(z_mean[labeled_mask])
-                classification_loss += torch.nn.functional.cross_entropy(
-                    y_logits, y[labeled_mask], reduction="mean"
-                )
+            classification_loss += self._classifier_loss(
+                self.classifier_1, tensors, inference_outputs, mode
+            )
 
         return LossOutput(
             loss=loss,
@@ -553,6 +611,28 @@ class DIAGVAE(BaseModuleClass):
                 "classification_loss": classification_loss,
             },
         )
+
+    def _classifier_loss(
+        self,
+        classifier: Classifier,
+        tensors: dict[str, torch.Tensor],
+        inference_outputs: dict[str, torch.Tensor],
+        mode: str,
+    ) -> torch.Tensor | float:
+        """Classification loss of ``classifier`` on the labelled cells of a minibatch.
+
+        Classifies the posterior mean of the latent variable. Returns ``0.0`` if the
+        minibatch has no labelled cells.
+        """
+        y = tensors[REGISTRY_KEYS.LABELS_KEY].ravel().long()
+        z_mean = inference_outputs[MODULE_KEYS.QZ_KEY].loc
+        labeled_mask = y != (self.n_labels[mode] - 1)
+        if not labeled_mask.any():
+            return 0.0
+        y_out = classifier(z_mean[labeled_mask])
+        if self.classification_loss_type == "logitnorm":
+            return _logitnorm_loss(y_out, y[labeled_mask], self.logitnorm_tau)
+        return F.cross_entropy(y_out, y[labeled_mask], reduction="mean")
 
     @torch.inference_mode()
     def sample(
