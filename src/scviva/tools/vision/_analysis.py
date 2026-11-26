@@ -523,6 +523,8 @@ class VisionAnalysis:
             Use ``adata.raw`` gene names/expression for gene-presence filtering.
         min_signature_genes
             Minimum number of matching genes required to retain a signature.
+            Also applied to the ``_UP``/``_DOWN`` sub-signatures added by
+            ``split_signed``.
         sig_gene_threshold
             Minimum fraction of cells expressing a gene for it to be
             eligible for signature membership.
@@ -545,7 +547,12 @@ class VisionAnalysis:
         )
         self._signature_varm_key = varm_key
         if split_signed:
-            split_signed_signatures(self._adata, varm_key=varm_key, use_raw=use_raw)
+            split_signed_signatures(
+                self._adata,
+                varm_key=varm_key,
+                use_raw=use_raw,
+                min_signature_genes=min_signature_genes,
+            )
 
     def attach_signatures(self, varm_key: str = "signatures") -> None:
         """Point this session at signatures already loaded into ``adata.varm``.
@@ -639,6 +646,17 @@ class VisionAnalysis:
         :meth:`compute_signatures`, also computes signature differential
         expression, per-signature gene importance, a signature dendrogram,
         and signature clusters — mirroring R VISION's ``ClusterComparisons``.
+
+        The result tables have the columns of
+        :func:`scanpy.get.rank_genes_groups_df`. Signature scores, numeric
+        ``adata.obs`` columns and protein abundances are not log-normalized
+        expression and can be negative, so a log fold change is not defined for
+        them: for these tables (``adata.uns["vision_signature_differential"]``,
+        the ``"numeric"`` table of ``adata.uns["vision_meta_differential"]`` and
+        ``adata.uns["vision_protein_differential"]``) the ``logfoldchanges``
+        column holds the difference in mean value between the group and the
+        rest (mean of the group minus mean of the rest), for signatures the
+        difference in mean score.
         """
         self._require(STEP_DE)
         from scviva.tools.vision.tools.signature import compute_obs_df_scores
@@ -828,7 +846,11 @@ class VisionAnalysis:
         for c in self._cat_obs_cols:
             try:
                 rank_genes_groups(
-                    prot_adata, groupby=c, key_added=f"rank_genes_groups_{c}", method="wilcoxon"
+                    prot_adata,
+                    groupby=c,
+                    key_added=f"rank_genes_groups_{c}",
+                    method="wilcoxon",
+                    log_transformed=False,
                 )
             except ValueError:
                 continue
@@ -877,8 +899,13 @@ class VisionAnalysis:
         sig_adata = ad.AnnData(adata.obsm[SIGNATURES_OBSM_KEY])
         sig_adata.obs = adata.obs.loc[:, self._cat_obs_cols].copy()
         for c in self._cat_obs_cols:
+            # Signature scores are z-scores: `logfoldchanges` is the difference in mean score.
             rank_genes_groups(
-                sig_adata, groupby=c, key_added=f"rank_genes_groups_{c}", method="wilcoxon"
+                sig_adata,
+                groupby=c,
+                key_added=f"rank_genes_groups_{c}",
+                method="wilcoxon",
+                log_transformed=False,
             )
         self._sig_adata = sig_adata
 
@@ -893,7 +920,9 @@ class VisionAnalysis:
         n_numeric = numeric_data.shape[1]
         # AnnData requires >= 1 variable; use a zeros placeholder when there
         # is no numeric metadata so categorical chi-squared still runs.
-        obs_x = np.log1p(numeric_data.to_numpy()) if n_numeric > 0 else np.zeros((adata.n_obs, 1))
+        # Not log-transformed: the Wilcoxon test is rank-based, and `logfoldchanges` is the
+        # difference of the group means, which is also defined for negative values.
+        obs_x = numeric_data.to_numpy(dtype=float) if n_numeric > 0 else np.zeros((adata.n_obs, 1))
         obs_var_names = list(numeric_data.columns) if n_numeric > 0 else ["_placeholder"]
         obs_adata = ad.AnnData(
             X=obs_x,
@@ -904,7 +933,11 @@ class VisionAnalysis:
             try:
                 if n_numeric > 0:
                     rank_genes_groups(
-                        obs_adata, groupby=c, key_added=f"rank_genes_groups_{c}", method="wilcoxon"
+                        obs_adata,
+                        groupby=c,
+                        key_added=f"rank_genes_groups_{c}",
+                        method="wilcoxon",
+                        log_transformed=False,
                     )
             except ValueError:
                 # A category with a single observation can't be tested.

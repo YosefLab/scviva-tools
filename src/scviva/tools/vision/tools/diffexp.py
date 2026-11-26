@@ -192,6 +192,10 @@ class _RankGenes:
         Key in ``adata.layers`` to use instead of ``adata.X`` / ``adata.raw.X``.
     comp_pts : bool, default False
         Also compute the fraction of cells expressing each gene per group.
+    log_transformed : bool, default True
+        Whether the data are log1p-transformed expression. If ``False``,
+        ``logfoldchanges`` holds the difference of the group means instead of
+        a log2 fold change.
     """
 
     def __init__(
@@ -203,7 +207,9 @@ class _RankGenes:
         use_raw: bool = True,
         layer: str | None = None,
         comp_pts: bool = False,
+        log_transformed: bool = True,
     ):
+        self.log_transformed = log_transformed
         if "log1p" in adata.uns and adata.uns["log1p"]["base"] is not None:
             self.expm1_func = lambda x: np.expm1(x * np.log(adata.uns["log1p"]["base"]))
         else:
@@ -351,7 +357,7 @@ class _RankGenes:
 
                 # Calculate rank sums for each chunk for the current mask
                 for ranks, left, right in _ranks(self.X, mask, mask_rest):
-                    scores[left:right] = np.sum(ranks.iloc[0:n_active, :])
+                    scores[left:right] = ranks.iloc[0:n_active, :].to_numpy().sum(axis=0)
                     if tie_correct:
                         T[left:right] = _tiecorrect(ranks)
 
@@ -390,7 +396,7 @@ class _RankGenes:
             for ranks, left, right in _ranks(self.X):
                 # sum up adjusted_ranks to calculate W_m,n
                 for imask, mask in enumerate(self.groups_masks):
-                    scores[imask, left:right] = np.sum(ranks.iloc[mask, :])
+                    scores[imask, left:right] = ranks.iloc[mask, :].to_numpy().sum(axis=0)
                     if tie_correct:
                         T[imask, left:right] = _tiecorrect(ranks)
 
@@ -498,10 +504,17 @@ class _RankGenes:
                     mean_rest = self.means_rest[group_index]
                 else:
                     mean_rest = self.means[self.ireference]
-                foldchanges = (self.expm1_func(mean_group) + 1e-9) / (
-                    self.expm1_func(mean_rest) + 1e-9
-                )  # add small value to remove 0's
-                self.stats[group_name, "logfoldchanges"] = np.log2(foldchanges[global_indices])
+                if self.log_transformed:
+                    foldchanges = (self.expm1_func(mean_group) + 1e-9) / (
+                        self.expm1_func(mean_rest) + 1e-9
+                    )  # add small value to remove 0's
+                    self.stats[group_name, "logfoldchanges"] = np.log2(foldchanges[global_indices])
+                else:
+                    # The fold change above needs log1p-transformed expression. The
+                    # difference of the means is defined for values of any sign.
+                    self.stats[group_name, "logfoldchanges"] = (mean_group - mean_rest)[
+                        global_indices
+                    ]
 
         if n_genes_user is None:
             self.stats.index = self.var_names
@@ -523,12 +536,13 @@ def rank_genes_groups(
     corr_method: _CorrMethod = "benjamini-hochberg",
     tie_correct: bool = False,
     layer: str | None = None,
+    log_transformed: bool = True,
     **kwds,
 ) -> AnnData | None:
     """
     Rank genes for characterizing groups.
 
-    Expects logarithmized data.
+    Expects logarithmized data, unless ``log_transformed=False``.
 
     Parameters
     ----------
@@ -567,6 +581,12 @@ def rank_genes_groups(
     copy
         If `True`, operate on and return a copy of `adata`; otherwise modify
         `adata` in place and return `None`.
+    log_transformed
+        Whether the data are log1p-transformed expression (default). Set to
+        `False` for other data, such as signature scores, which can be
+        negative: `logfoldchanges` then holds the difference of the group
+        means (mean of the group minus mean of the reference) instead of a
+        log2 fold change, which is not defined for such data.
     **kwds
         Accepted for compatibility with scanpy's signature. The legacy
         ``only_positive`` key is honoured (as the inverse of ``rankby_abs``);
@@ -589,6 +609,7 @@ def rank_genes_groups(
         fold change for each gene for each group. Ordered according to
         scores. Only provided if method is 't-test' like.
         Note: this is an approximation calculated from mean-log values.
+        With `log_transformed=False`, the difference of the group means.
     **pvals** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
         p-values.
     **pvals_adj** : structured `np.ndarray` (`.uns['rank_genes_groups']`)
@@ -649,11 +670,14 @@ def rank_genes_groups(
         "use_raw": use_raw,
         "layer": layer,
         "corr_method": corr_method,
+        "log_transformed": log_transformed,
     }
 
-    test_obj = _RankGenes(adata, groups_order, groupby, reference, use_raw, layer, pts)
+    test_obj = _RankGenes(
+        adata, groups_order, groupby, reference, use_raw, layer, pts, log_transformed
+    )
 
-    if check_nonnegative_integers(test_obj.X) and method != "logreg":
+    if log_transformed and check_nonnegative_integers(test_obj.X) and method != "logreg":
         logg.warning(
             "It seems you use rank_genes_groups on the raw count data. "
             "Please logarithmize your data before calling rank_genes_groups."

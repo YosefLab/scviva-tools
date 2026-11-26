@@ -823,6 +823,8 @@ def split_signed_signatures(
     varm_key: str = "signatures",
     sig_names: list | None = None,
     use_raw: bool = False,
+    *,
+    min_signature_genes: int = 0,
 ) -> None:
     """Auto-split bidirectional signatures into ``_UP`` / ``_DOWN`` sub-signatures.
 
@@ -834,7 +836,8 @@ def split_signed_signatures(
       convention), 0 elsewhere.
 
     The original bidirectional column is preserved so the combined score
-    remains available alongside the split sub-signatures.
+    remains available alongside the split sub-signatures. A sub-signature with
+    fewer than ``min_signature_genes`` genes is not added.
 
     Parameters
     ----------
@@ -850,6 +853,11 @@ def split_signed_signatures(
         Read/write the signature matrix in ``adata.raw.varm`` instead of
         ``adata.varm``, matching where :func:`load_signatures` stored it
         when called with ``use_raw=True``.
+    min_signature_genes
+        Minimum number of genes a ``_UP`` or ``_DOWN`` sub-signature must have
+        to be added. Pass the value given to :func:`load_signatures` to apply
+        its filter to the sub-signatures too. The default ``0`` adds every
+        sub-signature.
 
     Returns
     -------
@@ -877,17 +885,19 @@ def split_signed_signatures(
         col_str = str(col)
         if col_str.endswith("_UP") or col_str.endswith("_DOWN"):
             continue
-        if f"{col_str}_UP" in existing:
-            continue
         col_vals = sig_mat[col]
-        has_up = (col_vals > 0).any()
-        has_dn = (col_vals < 0).any()
-        if has_up and has_dn:
-            up_col = col_vals.clip(lower=0)  # +1 for up genes, 0 otherwise
+        if not ((col_vals > 0).any() and (col_vals < 0).any()):
+            continue
+        # Each half is added on its own, so a later call with a lower
+        # min_signature_genes completes a split that an earlier call left partial.
+        halves = {
+            f"{col_str}_UP": col_vals.clip(lower=0),  # +1 for up genes, 0 otherwise
             # -1 for down genes, 0 otherwise (matches R's _DN weight convention)
-            dn_col = col_vals.clip(upper=0)
-            extra_cols[f"{col}_UP"] = up_col
-            extra_cols[f"{col}_DOWN"] = dn_col
+            f"{col_str}_DOWN": col_vals.clip(upper=0),
+        }
+        for name, half in halves.items():
+            if name not in existing and (half != 0).sum() >= min_signature_genes:
+                extra_cols[name] = half
 
     if extra_cols:
         extra_df = pd.DataFrame(extra_cols, index=sig_mat.index)

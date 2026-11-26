@@ -642,7 +642,7 @@ def standardize_ct_counts(
         for sample in adata.obs[sample_key].unique():
             subset = np.where(adata.obs[sample_key] == sample)[0]
             counts[:, subset] = center_ct_counts_torch(
-                counts[:, subset], num_umi[subset], model, cell_types[subset]
+                counts[:, subset], num_umi[subset], model, cell_types.iloc[subset]
             )
     else:
         counts = center_ct_counts_torch(counts, num_umi, model, cell_types)
