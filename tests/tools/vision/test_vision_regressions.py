@@ -256,6 +256,21 @@ def test_split_signed_signatures_applies_min_signature_genes():
         ]
         assert ((sig != 0).sum(axis=0) >= 5).all()
 
+    # a later call with a lower threshold adds the missing half only
+    completed = adata.copy()
+    vision_signature.split_signed_signatures(completed, min_signature_genes=2)
+    completed_sig = completed.varm["signatures"]
+    assert list(completed_sig.columns) == [
+        "mixed",
+        "balanced",
+        "mixed_UP",
+        "balanced_UP",
+        "balanced_DOWN",
+        "mixed_DOWN",
+    ]
+    assert (completed_sig["mixed_DOWN"] < 0).sum() == 2
+    pd.testing.assert_series_equal(completed_sig["mixed_UP"], sig["mixed_UP"])
+
     # also when only the down half was kept by an earlier call
     adata.varm["signatures"] = sig.rename(columns={"mixed_UP": "mixed_DOWN"})
     vision_signature.split_signed_signatures(adata, min_signature_genes=5)

@@ -885,19 +885,19 @@ def split_signed_signatures(
         col_str = str(col)
         if col_str.endswith("_UP") or col_str.endswith("_DOWN"):
             continue
-        if f"{col_str}_UP" in existing or f"{col_str}_DOWN" in existing:
-            continue
         col_vals = sig_mat[col]
-        has_up = (col_vals > 0).any()
-        has_dn = (col_vals < 0).any()
-        if has_up and has_dn:
-            up_col = col_vals.clip(lower=0)  # +1 for up genes, 0 otherwise
+        if not ((col_vals > 0).any() and (col_vals < 0).any()):
+            continue
+        # Each half is added on its own, so a later call with a lower
+        # min_signature_genes completes a split that an earlier call left partial.
+        halves = {
+            f"{col_str}_UP": col_vals.clip(lower=0),  # +1 for up genes, 0 otherwise
             # -1 for down genes, 0 otherwise (matches R's _DN weight convention)
-            dn_col = col_vals.clip(upper=0)
-            if (up_col != 0).sum() >= min_signature_genes:
-                extra_cols[f"{col}_UP"] = up_col
-            if (dn_col != 0).sum() >= min_signature_genes:
-                extra_cols[f"{col}_DOWN"] = dn_col
+            f"{col_str}_DOWN": col_vals.clip(upper=0),
+        }
+        for name, half in halves.items():
+            if name not in existing and (half != 0).sum() >= min_signature_genes:
+                extra_cols[name] = half
 
     if extra_cols:
         extra_df = pd.DataFrame(extra_cols, index=sig_mat.index)
