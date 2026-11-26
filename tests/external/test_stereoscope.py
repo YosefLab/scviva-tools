@@ -116,3 +116,33 @@ def test_stereoscope_external_import():
 
     assert R is RNAStereoscope
     assert S is SpatialStereoscope
+
+
+def test_spatial_stereoscope_from_rna_model_gene_subset(stereo_data):
+    """A spatial dataset with a reordered subset of the reference genes uses matched parameters."""
+    sc_adata, st_adata = stereo_data
+    sc_model = _train_rna_model(sc_adata)
+    w_ref, px_o_ref = sc_model.module.get_params()
+
+    genes = sc_adata.var_names[::-1][:30]
+    st_subset = st_adata[:, genes].copy()
+    SpatialStereoscope.setup_anndata(st_subset, layer="counts")
+    st_model = SpatialStereoscope.from_rna_model(st_subset, sc_model)
+
+    positions = sc_adata.var_names.get_indexer(genes)
+    np.testing.assert_allclose(st_model.module.W.cpu().numpy(), w_ref[positions])
+    np.testing.assert_allclose(st_model.module.px_o.cpu().numpy(), px_o_ref[positions])
+    st_model.train(max_epochs=1)
+    assert st_model.get_proportions_df().shape == (st_subset.n_obs, 4)
+
+
+def test_spatial_stereoscope_from_rna_model_unknown_genes(stereo_data):
+    """Genes absent from the reference raise a clear error instead of failing in training."""
+    sc_adata, st_adata = stereo_data
+    sc_model = _train_rna_model(sc_adata)
+
+    st_other = st_adata.copy()
+    st_other.var_names = [f"other_{i}" for i in range(st_other.n_vars)]
+    SpatialStereoscope.setup_anndata(st_other, layer="counts")
+    with pytest.raises(ValueError, match="absent from the reference model"):
+        SpatialStereoscope.from_rna_model(st_other, sc_model)
